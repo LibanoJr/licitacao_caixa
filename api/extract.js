@@ -62,16 +62,17 @@ export default async function handler(req, res) {
 
   try {
     // Usando o modelo Gemini 1.5 Flash pela velocidade e excelente extração de dados
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`;    
-    
-   const response = await fetch(url, {
+  // Substitua sua variável url por esta linha
+const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+// E no seu fetch, use esta estrutura de corpo (body):
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{
-          role: 'user',
           parts: [
-            { text: SYSTEM_PROMPT + "\n\nAnalise o documento abaixo e responda APENAS com o JSON solicitado, sem markdown:" },
+            { text: SYSTEM_PROMPT + "\n\nResponda APENAS com o JSON." },
             {
               inline_data: {
                 mime_type: 'application/pdf',
