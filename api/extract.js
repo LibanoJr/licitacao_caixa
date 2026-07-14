@@ -64,30 +64,22 @@ export default async function handler(req, res) {
     // Usando o modelo Gemini 1.5 Flash pela velocidade e excelente extração de dados
     const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     
-    const response = await fetch(url, {
+   const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }]
-        },
         contents: [{
+          role: 'user',
           parts: [
+            { text: SYSTEM_PROMPT + "\n\nAnalise o documento abaixo e responda APENAS com o JSON solicitado, sem markdown:" },
             {
               inline_data: {
                 mime_type: 'application/pdf',
                 data: fileBase64
               }
-            },
-            { text: 'Extraia os dados deste documento de acordo com as instruções do sistema.' }
+            }
           ]
-        }],
-        generationConfig: {
-          // Isso força a API do Gemini a devolver um JSON puro, sem crases do Markdown
-          responseMimeType: "application/json" 
-        }
+        }]
       })
     });
 
