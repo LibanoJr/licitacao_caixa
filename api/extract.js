@@ -72,13 +72,8 @@ const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-
       body: JSON.stringify({
         contents: [{
           parts: [
-            { text: SYSTEM_PROMPT + "\n\nResponda APENAS com o JSON." },
-            {
-              inline_data: {
-                mime_type: 'application/pdf',
-                data: fileBase64
-              }
-            }
+            { text: SYSTEM_PROMPT },
+            { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
           ]
         }]
       })
