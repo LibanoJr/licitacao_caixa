@@ -62,7 +62,7 @@ export default async function handler(req, res) {
 
   try {
     // Usando o modelo Gemini 1.5 Flash pela velocidade e excelente extração de dados
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${apiKey}`;    
     
    const response = await fetch(url, {
       method: 'POST',
