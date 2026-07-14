@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     // Usando o modelo Gemini 1.5 Flash pela velocidade e excelente extração de dados
   // Substitua sua variável url por esta linha
 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
+    
 // E no seu fetch, use esta estrutura de corpo (body):
     const response = await fetch(url, {
       method: 'POST',
