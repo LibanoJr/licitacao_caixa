@@ -2,17 +2,17 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
 
   const { fileBase64, SYSTEM_PROMPT } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY; // Usará a sua chave da Groq (gsk_...)
+  const apiKey = process.env.GEMINI_API_KEY; // Sua chave da Groq (gsk_...) cadastrada na Vercel
 
   const url = "https://api.groq.com/openai/v1/chat/completions";
 
-  // 1. Decodifica o base64 para extrair o texto bruto legível do PDF
+  // Extração básica de texto do Base64 do PDF
   let textoExtraido = "";
   try {
     const buffer = Buffer.from(fileBase64, 'base64');
     textoExtraido = buffer.toString('utf-8').replace(/[^\x20-\x7E\s]/g, '');
   } catch (e) {
-    textoExtraido = "Falha ao decodificar base64 diretamente. Use OCR se necessário.";
+    textoExtraido = "Falha ao extrair texto direto.";
   }
 
   const instrucaoForcada = `
@@ -69,11 +69,9 @@ export default async function handler(req, res) {
     }
 
     const text = data.choices[0].message.content.trim();
-    // Limpeza de qualquer tag markdown residual do JSON
     const jsonStr = text.replace(/```json|```/g, '').trim();
     const parsedData = JSON.parse(jsonStr);
 
-    // Mapeamento de segurança idêntico para o seu frontend ler sem problemas
     const responseMapeada = {
       matricula: parsedData.matricula || "",
       numeroMatricula: parsedData.matricula || "",
