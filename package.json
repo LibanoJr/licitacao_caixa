@@ -2,10 +2,7 @@
   "name": "leitura-matriculas-gehpa",
   "version": "1.0.0",
   "private": true,
-  "dependencies": {
-    "pdf-parse": "1.1.1"
-  },
   "engines": {
-    "node": "18.x"
+    "node": ">=18"
   }
 }
