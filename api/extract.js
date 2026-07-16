@@ -1,126 +1,94 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
 
-  const { fileBase64, SYSTEM_PROMPT } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY; // Sua chave da Groq (gsk_...)
+  const { fileBase64 } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY;
 
-  const url = "https://api.groq.com/openai/v1/chat/completions";
-
-  // Extrator ultraleve de texto interno de PDF binário
-  let textoExtraido = "";
-  try {
-    const buffer = Buffer.from(fileBase64, 'base64');
-    const pdfString = buffer.toString('binary');
-    
-    // Captura blocos de texto comuns em PDFs estruturados (comandos Tj e TJ)
-    const regex = /\(([^)]+)\)\s*Tj/g;
-    let matches;
-    let stringsEncontradas = [];
-    
-    while ((matches = regex.exec(pdfString)) !== null) {
-      stringsEncontradas.push(matches[1]);
-    }
-    
-    textoExtraido = stringsEncontradas.join(' ');
-
-    // Fallback simples caso o PDF use compressão e a busca direta por Tj falhe
-    if (textoExtraido.trim().length < 50) {
-      textoExtraido = pdfString
-        .replace(/[^\x20-\x7E\n]/g, '') // Remove caracteres binários não-ASCII
-        .replace(/\s+/g, ' ')           // Remove espaços duplicados
-        .substring(0, 5000);            // Limita tamanho
-    } else {
-      textoExtraido = textoExtraido.substring(0, 5000);
-    }
-  } catch (e) {
-    textoExtraido = "Falha ao extrair texto.";
-  }
+  // Modelo definitivo: Estável, gratuito, leitura nativa de PDFs
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
   const instrucaoForcada = `
-    Você é um extrator de dados especialista em documentos de registro de imóveis.
-    Analise o texto extraído do PDF da matrícula e organize as informações solicitadas.
+    Você é um assistente especializado em Cartórios de Registro de Imóveis.
+    Analise o PDF da matrícula anexada e extraia os dados.
     
-    Responda APENAS com um objeto JSON plano válido (sem formatação markdown, sem blocos de código com crases, sem texto explicativo).
+    REGRAS RÍGIDAS E OBRIGATÓRIAS:
+    1. Retorne APENAS um objeto JSON válido e nada mais. 
+    2. NÃO use formatação markdown (NÃO inclua \`\`\`json ou \`\`\`).
+    3. Se não encontrar o dado, retorne uma string vazia "".
     
-    Estrutura obrigatória do JSON (valores vazios devem retornar "" se não encontrados):
+    Use EXATAMENTE as seguintes chaves no seu JSON:
     {
-      "matricula": "Número de identificação da matrícula encontrado no topo ou no início do documento",
-      "cnm": "Código Nacional de Matrícula (CNM)",
-      "cartorio": "Nome completo do cartório, comarca e estado",
-      "endereco": "Endereço completo ou descrição física detalhada do imóvel",
-      "proprietario": "Nome completo do proprietário atual ou adquirente final",
-      "areaPrivativa": "Área privativa (ex: 65,40 m²)",
-      "areaTotal": "Área total do imóvel",
-      "matriculaOrigem": "Número da matrícula ou transcrição de origem",
-      "programaHabitacional": "Informações de programas de moradia se houver"
+      "matricula": "O número da matrícula do imóvel",
+      "cnm": "O Código Nacional de Matrícula",
+      "cartorio": "Nome do cartório, cidade e UF",
+      "endereco": "Endereço ou descrição do imóvel",
+      "proprietario": "Nome do atual proprietário",
+      "areaPrivativa": "Tamanho da área privativa com a unidade de medida",
+      "areaTotal": "Tamanho da área total com a unidade de medida",
+      "matriculaOrigem": "Número da matrícula de origem",
+      "programaHabitacional": "Nome do programa habitacional, se houver"
     }
-
-    Texto extraído do PDF:
-    ---
-    ${textoExtraido}
-    ---
-
-    Contexto adicional de instruções do usuário:
-    ${SYSTEM_PROMPT || ""}
   `;
 
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant", // Modelo leve, rápido e com alto limite de tokens por minuto (TPM)
-        temperature: 0.1,
-        messages: [
-          {
-            role: "user",
-            content: instrucaoForcada
-          }
-        ]
+        contents: [{
+          parts: [
+            { text: instrucaoForcada },
+            { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
+          ]
+        }]
       })
     });
 
     const data = await response.json();
 
     if (data.error) {
-      return res.status(500).json({ error: "Erro na API Groq: " + data.error.message });
+      return res.status(500).json({ error: "Erro na API do Google: " + data.error.message });
     }
 
-    const text = data.choices[0].message.content.trim();
+    // Extração e limpeza agressiva para evitar quebra do JSON
+    const text = data.candidates[0].content.parts[0].text;
     const jsonStr = text.replace(/```json|```/g, '').trim();
     const parsedData = JSON.parse(jsonStr);
 
-    const responseMapeada = {
+    // Mapeamento redundante: Entrega a chave do jeito que o seu frontend precisar ler
+    const responseFinal = {
       matricula: parsedData.matricula || "",
-      numeroMatricula: parsedData.matricula || "",
       numero_matricula: parsedData.matricula || "",
+      
       cnm: parsedData.cnm || "",
+      
       cartorio: parsedData.cartorio || "",
       cartorio_comarca: parsedData.cartorio || "",
-      cartorioComarca: parsedData.cartorio || "",
+      
       endereco: parsedData.endereco || "",
       endereco_descricao: parsedData.endereco || "",
-      enderecoDescricao: parsedData.endereco || "",
+      
       proprietario: parsedData.proprietario || "",
       proprietario_atual: parsedData.proprietario || "",
-      proprietarioAtual: parsedData.proprietario || "",
+      
       areaPrivativa: parsedData.areaPrivativa || parsedData.area_privativa || "",
       area_privativa: parsedData.areaPrivativa || parsedData.area_privativa || "",
+      
       areaTotal: parsedData.areaTotal || parsedData.area_total || "",
       area_total: parsedData.areaTotal || parsedData.area_total || "",
+      
       matriculaOrigem: parsedData.matriculaOrigem || parsedData.matricula_origem || "",
       matricula_origem: parsedData.matriculaOrigem || parsedData.matricula_origem || "",
+      
       programaHabitacional: parsedData.programaHabitacional || parsedData.programa_habitacional || "",
       programa_habitacional: parsedData.programaHabitacional || parsedData.programa_habitacional || "",
+      
       confianca: "Alta"
     };
 
-    res.status(200).json(responseMapeada);
+    return res.status(200).json(responseFinal);
 
   } catch (error) {
-    res.status(500).json({ error: "Falha ao processar dados com Groq: " + error.message });
+    return res.status(500).json({ error: "Falha ao processar e mapear os dados: " + error.message });
   }
 }
