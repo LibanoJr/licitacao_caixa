@@ -6,18 +6,17 @@ export default async function handler(req) {
   try {
     const formData = await req.formData();
     const file = formData.get('file');
-    const promptText = formData.get('prompt') || 'Extraia os dados deste PDF em formato JSON.';
-
-    // Nota: A Groq processa texto. Para PDFs, o ideal é converter para texto antes
-    // Se o PDF for muito complexo, este é o método mais estável e gratuito hoje.
-    const arrayBuffer = await file.arrayBuffer();
-    // Aqui estamos simulando a leitura. Se o seu PDF for texto, ele extrai perfeitamente.
     
+    // A Groq não aceita arquivos diretamente como o Google. 
+    // Como estamos em um ambiente limitado (Edge), vamos extrair o texto de forma simples.
+    // Se o PDF for um texto comum, o código abaixo processa.
+    const textContent = await file.text(); 
+
     const requestBody = {
       model: "llama-3.3-70b-versatile",
       messages: [
-        { role: "system", content: "Você é um especialista em extração de dados JSON." },
-        { role: "user", content: `${promptText} (Conteúdo do arquivo processado como texto)` }
+        { role: "system", content: "Extraia os dados em JSON." },
+        { role: "user", content: `Analise este conteúdo e extraia os dados estruturados: ${textContent}` }
       ]
     };
 
@@ -31,7 +30,12 @@ export default async function handler(req) {
     });
 
     const data = await response.json();
-    return new Response(JSON.stringify({ resultado: data.choices[0].message.content }), {
+    
+    // CORREÇÃO DA ESTRUTURA GROQ: 
+    // A resposta fica dentro de choices[0].message.content
+    const resultado = data.choices[0].message.content;
+
+    return new Response(JSON.stringify({ resultado }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
