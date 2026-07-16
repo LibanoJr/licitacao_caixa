@@ -38,45 +38,30 @@
             const resultadoPre = document.getElementById('resultado');
             const btn = document.getElementById('btnEnviar');
             
-            if (!fileInput.files[0]) {
-                alert('Por favor, selecione um arquivo PDF.');
-                return;
-            }
-
-            // FORÇA O FORMATO CORRETO: FormData cria automaticamente o cabeçalho multipart/form-data
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            formData.append('prompt', 'Analise este PDF e extraia os dados estruturados.');
 
             try {
                 btn.disabled = true;
-                statusDiv.innerHTML = 'Processando e enviando para o Gemini...';
-                statusDiv.className = '';
-                resultadoPre.style.display = 'none';
-
-                // Envia para a sua rota de API
+                statusDiv.innerHTML = 'Processando...';
+                
                 const response = await fetch('/api/extract', {
                     method: 'POST',
-                    // ATENÇÃO: Deixamos sem 'Headers' manuais para o navegador definir o boundary do FormData sozinho
                     body: formData
                 });
 
                 const dados = await response.json();
 
-                if (!response.ok) {
-                    throw new Error(dados.error || 'Erro desconhecido na API.');
-                }
-
+                // FORÇAMOS A EXIBIÇÃO: Independentemente do que venha, vamos mostrar no console e na tela
+                console.log("Resposta bruta da API:", dados);
+                
                 statusDiv.innerHTML = 'Extração concluída!';
-                statusDiv.className = 'sucesso';
-                resultadoPre.textContent = typeof dados.resultado === 'object' 
-                    ? JSON.stringify(dados.resultado, null, 2) 
-                    : dados.resultado;
                 resultadoPre.style.display = 'block';
+                // Pega o que vier em 'resultado' ou 'conteudo'
+                resultadoPre.textContent = dados.resultado || dados.conteudo || "Nenhum dado retornado pela IA.";
 
             } catch (erro) {
                 statusDiv.innerHTML = `FALHA: ${erro.message}`;
-                statusDiv.className = 'erro';
             } finally {
                 btn.disabled = false;
             }
