@@ -1,17 +1,19 @@
-export const config = { runtime: 'edge' };
+import pdfParse from 'pdf-parse';
 
-export default async function handler(req) {
+export const config = { runtime: 'nodejs' }; // Mudamos para nodejs para usar o pdf-parse
+
+export default async function handler(req, res) {
   try {
     const formData = await req.formData();
     const file = formData.get('file');
-    
-    // Convertemos o arquivo para uma string base64, que é a forma 
-    // universal de enviar qualquer tipo de arquivo para IAs
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = btoa(
-      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-    );
+    const buffer = Buffer.from(arrayBuffer);
 
+    // 1. Extrai o texto do PDF
+    const pdfData = await pdfParse(buffer);
+    const textoExtraido = pdfData.text;
+
+    // 2. Envia apenas o texto para a IA
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: 'POST',
       headers: {
@@ -20,23 +22,14 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [{ 
-          role: "user", 
-          content: `Analise o arquivo enviado (base64): ${base64.substring(0, 5000)}. Extraia os dados em JSON.` 
-        }]
+        messages: [{ role: "user", content: `Analise este conteúdo de matrícula e extraia os dados em JSON: ${textoExtraido}` }]
       })
     });
 
     const data = await response.json();
-    
-    // Verificamos se a resposta existe antes de tentar acessar
-    const texto = data.choices?.[0]?.message?.content;
-    
-    if (!texto) {
-      return new Response(JSON.stringify({ error: "IA não retornou dados. Resposta: " + JSON.stringify(data) }), { status: 500 });
-    }
+    const resultado = data.choices[0].message.content;
 
-    return new Response(JSON.stringify({ resultado: texto }), {
+    return new Response(JSON.stringify({ resultado }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
