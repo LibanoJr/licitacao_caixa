@@ -14,22 +14,15 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: `Extraia dados: ${textContent.substring(0, 2000)}` }]
+        messages: [{ role: "user", content: `Extraia os dados em JSON deste conteúdo: ${textContent}` }]
       })
     });
 
-    // AQUI ESTÁ O SEGREDO: Vamos ler como texto, não como JSON
-    const respostaBruta = await response.text();
-    
-    // Se não for JSON (começar com <), vamos exibir o texto bruto para saber o que é
-    return new Response(JSON.stringify({ 
-      status: response.status,
-      conteudo: respostaBruta.substring(0, 500) // Mostra os primeiros 500 caracteres
-    }), {
+    const data = await response.json();
+    return new Response(JSON.stringify({ resultado: data.choices[0].message.content }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
-
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
