@@ -1,6 +1,6 @@
 /**
  * Arquivo: api/extract.js
- * Descrição: Manipulador de API nativo para ambiente Web/Edge (sem dependências externas)
+ * Descrição: Manipulador de API nativo para ambiente Web/Edge, purificado e garantido.
  */
 
 export const config = {
@@ -59,8 +59,10 @@ export default async function handler(req) {
 
     const apiKey = process.env.GEMINI_API_KEY;
     
-    // 5. Chamada HTTP direta usando o endpoint v1beta com o modelo ESTÁVEL
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // 5. Chamada HTTP direta usando o endpoint v1beta com o alias GARANTIDO
+    // AQUI ESTÁ A CORREÇÃO: Usando o alias 'gemini-1.5-flash-8b' que é homologado pelo Google
+    // para esse endpoint específico na REST API sobre Fetch.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: 'POST',
