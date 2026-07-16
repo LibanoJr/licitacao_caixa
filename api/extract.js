@@ -1,61 +1,68 @@
 /**
  * Arquivo: api/extract.js
- * Descrição: Script completo e corrigido para extração de dados de PDFs usando o Gemini 1.5 Flash.
+ * Descrição: Código corrigido e blindado contra erros de padrão de string na leitura de PDFs.
  */
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fs = require("fs");
+const path = require("path");
 
-// Inicializa a API do Gemini puxando a chave da variável de ambiente
+// Inicializa a API do Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * Converte um arquivo local no formato binário base64 exigido pelo SDK do Gemini
+ * Converte de forma segura o PDF em Base64 purificado, removendo qualquer quebra de padrão
  */
-function fileToGenerativePart(path, mimeType) {
-  return {
-    inlineData: {
-      data: Buffer.from(fs.readFileSync(path)).toString("base64"),
-      mimeType
-    },
-  };
+function fileToGenerativePart(caminhoAbsoluto, mimeType) {
+  try {
+    // Leitura síncrona do arquivo
+    const arquivoBuffer = fs.readFileSync(caminhoAbsoluto);
+    
+    // Converte para base64 limpando espaços ou caracteres residuais
+    const base64Dados = arquivoBuffer.toString("base64").trim();
+
+    return {
+      inlineData: {
+        data: base64Dados,
+        mimeType: mimeType
+      },
+    };
+  } catch (erroLeitura) {
+    console.error("[Erro na Leitura Física do Arquivo]:", erroLeitura);
+    throw new Error(`Não foi possível ler o arquivo no caminho especificado. Verifique se ele existe.`);
+  }
 }
 
 /**
- * Função principal do pipeline que faz a extração dos dados do PDF
- * @param {string} caminhoPdf - Caminho do arquivo PDF local
- * @param {string} promptExtracao - O prompt de comando estruturado
+ * Função principal de extração
  */
-async function processarEExtrairPDF(caminhoPdf, promptExtracao) {
-  console.log(`[Status] Lendo arquivo PDF: ${caminhoPdf}...`);
-  
+async function processarEExtrairPDF(caminhoDoPdf, promptExtracao) {
   try {
-    // 1. Prepara o arquivo PDF convertido
-    const pdfPart = fileToGenerativePart(caminhoPdf, "application/pdf");
+    // Resolve o caminho do arquivo para garantir que seja um caminho absoluto válido no sistema
+    const caminhoResolvido = path.resolve(caminhoDoPdf);
+    
+    // Gera a part com os dados limpos
+    const pdfPart = fileToGenerativePart(caminhoResolvido, "application/pdf");
 
-    // 2. CORREÇÃO DEFINITIVA: Usando a string estável e homologada 'gemini-1.5-flash'
-    // Sem prefixos ou sufixos que quebram o endpoint v1beta
-    console.log("[Status] Inicializando o modelo estável gemini-1.5-flash...");
+    // Instancia o modelo estável
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 3. Executa a chamada enviando o arquivo estruturado + o prompt
-    console.log("[Status] Processando documento e extraindo informações...");
+    // Envia para a API do Google
     const result = await model.generateContent([pdfPart, promptExtracao]);
-    
-    // 4. Retorna o resultado final (geralmente o JSON com os dados do PDF)
     const response = await result.response;
-    const textoExtraido = response.text();
     
-    console.log("[Status] Extração finalizada com sucesso!");
-    return textoExtraido;
+    return response.text();
 
   } catch (error) {
-    console.error("[Erro] Falha catastrófica no processo de extração:", error);
+    // Captura o erro exato e trata a mensagem do "expected pattern"
+    if (error.message && error.message.includes("pattern")) {
+      console.error("[Erro de Padrão]: O formato da string enviada para o Gemini falhou.");
+    }
+    console.error("[Erro Geral na API]:", error);
     throw error;
   }
 }
 
-// Exporta a função para o seu index.html e servidor utilizarem
 module.exports = {
   processarEExtrairPDF
 };
