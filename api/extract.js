@@ -12,7 +12,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         contents: [{
           parts: [
-            { text: SYSTEM_PROMPT + "\n\nResponda APENAS com este formato JSON: {\"cnm\":\"valor\", \"cartorio\":\"valor\", \"endereco\":\"valor\", \"proprietario\":\"valor\", \"areaPrivativa\":\"valor\", \"areaTotal\":\"valor\", \"matriculaOrigem\":\"valor\", \"programaHabitacional\":\"valor\"}" },
+            { text: SYSTEM_PROMPT + "\n\nResponda APENAS com JSON puro sem markdown." },
             { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
           ]
         }]
@@ -20,13 +20,17 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
+
+    // Debug: Se a estrutura de candidatos não existir, retorna o erro completo da API
+    if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+      return res.status(500).json({ error: "Resposta inesperada da API: " + JSON.stringify(data) });
+    }
+
     const text = data.candidates[0].content.parts[0].text;
-    
-    // Tenta limpar e converter
     const jsonStr = text.replace(/```json|```/g, '').trim();
     res.status(200).json(JSON.parse(jsonStr));
     
   } catch (error) {
-    res.status(500).json({ error: "Erro na extração: " + error.message });
+    res.status(500).json({ error: "Erro crítico: " + error.message });
   }
 }
