@@ -1,13 +1,9 @@
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
-  if (req.method !== 'POST') return new Response("Método não permitido", { status: 405 });
-
   try {
     const formData = await req.formData();
     const file = formData.get('file');
-    if (!file) throw new Error("Arquivo não recebido");
-
     const textContent = await file.text();
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -18,18 +14,18 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: `Extraia dados deste texto: ${textContent}` }]
+        messages: [{ role: "user", content: `Extraia dados: ${textContent.substring(0, 2000)}` }]
       })
     });
 
-    const data = await response.json();
-
-    // AQUI ESTÁ A BLINDAGEM: Se a estrutura mudar, ele vai te dizer EXATAMENTE o que veio
-    if (!data.choices || data.choices.length === 0) {
-      return new Response(JSON.stringify({ error: "Resposta da API inesperada", raw: data }), { status: 500 });
-    }
-
-    return new Response(JSON.stringify({ resultado: data.choices[0].message.content }), {
+    // AQUI ESTÁ O SEGREDO: Vamos ler como texto, não como JSON
+    const respostaBruta = await response.text();
+    
+    // Se não for JSON (começar com <), vamos exibir o texto bruto para saber o que é
+    return new Response(JSON.stringify({ 
+      status: response.status,
+      conteudo: respostaBruta.substring(0, 500) // Mostra os primeiros 500 caracteres
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
