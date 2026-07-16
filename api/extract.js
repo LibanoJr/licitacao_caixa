@@ -2,7 +2,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
 
   const { fileBase64, SYSTEM_PROMPT } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY; // Usa a chave do OpenRouter que você salvou aqui
+  const apiKey = process.env.GEMINI_API_KEY;
 
   const url = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -33,11 +33,11 @@ export default async function handler(req, res) {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://vercel.com', // Obrigatório para o OpenRouter gratuito
+        'HTTP-Referer': 'https://vercel.com',
         'X-Title': 'Extrator de Matriculas'
       },
       body: JSON.stringify({
-        model: "google/gemini-2.0-flash-lite:free", // Modelo 100% gratuito e sem travas
+        model: "google/gemini-2.0-flash-lite", // ID correto do modelo no OpenRouter
         messages: [
           {
             role: "user",
