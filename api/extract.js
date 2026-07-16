@@ -4,8 +4,8 @@ export default async function handler(req, res) {
   const { fileBase64, SYSTEM_PROMPT } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
-  // Usando o Gemini 2.0 Flash, que está listado como ativo e disponível na sua conta
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  // Usando o Gemini 2.5 Flash Lite, que tem a maior cota livre de bloqueios no plano gratuito
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
 
   try {
     const response = await fetch(url, {
@@ -28,8 +28,6 @@ export default async function handler(req, res) {
     }
 
     const text = data.candidates[0].content.parts[0].text;
-    
-    // Remove as marcações de bloco de código markdown se a IA insistir em colocá-las
     const jsonStr = text.replace(/```json|```/g, '').trim();
     
     res.status(200).json(JSON.parse(jsonStr));
