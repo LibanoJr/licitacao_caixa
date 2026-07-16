@@ -2,28 +2,42 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
 
   const { fileBase64, SYSTEM_PROMPT } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY; // Usará a sua chave da Groq (gsk_...)
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-001:generateContent?key=${apiKey}`;
+  const url = "https://api.groq.com/openai/v1/chat/completions";
+
+  // 1. Decodifica o base64 para extrair o texto bruto legível do PDF
+  let textoExtraido = "";
+  try {
+    const buffer = Buffer.from(fileBase64, 'base64');
+    textoExtraido = buffer.toString('utf-8').replace(/[^\x20-\x7E\s]/g, '');
+  } catch (e) {
+    textoExtraido = "Falha ao decodificar base64 diretamente. Use OCR se necessário.";
+  }
 
   const instrucaoForcada = `
     Você é um extrator de dados especialista em documentos de registro de imóveis.
-    Analise o PDF fornecido e extraia as informações necessárias.
+    Analise o texto extraído do PDF da matrícula e organize as informações solicitadas.
     
-    Responda APENAS com um objeto JSON plano (sem formatação markdown, sem crases, sem texto explicativo).
+    Responda APENAS com um objeto JSON plano válido (sem formatação markdown, sem blocos de código com crases, sem texto explicativo).
     
-    Use EXATAMENTE estas chaves no JSON. Extraia o máximo de informações reais do documento para cada campo:
+    Estrutura obrigatória do JSON (valores vazios devem retornar "" se não encontrados):
     {
-      "matricula": "número da matrícula encontrado no topo/início do documento",
+      "matricula": "Número de identificação da matrícula encontrado no topo ou no início do documento",
       "cnm": "Código Nacional de Matrícula (CNM)",
-      "cartorio": "Nome do cartório, comarca e estado",
-      "endereco": "Endereço completo ou descrição física do imóvel",
-      "proprietario": "Nome completo do proprietário atual ou adquirente",
-      "areaPrivativa": "Área privativa (se houver, ex: 65,40 m²)",
-      "areaTotal": "Área total do imóvel (ex: 120,00 m²)",
+      "cartorio": "Nome completo do cartório, comarca e estado",
+      "endereco": "Endereço completo ou descrição física detalhada do imóvel",
+      "proprietario": "Nome completo do proprietário atual ou adquirente final",
+      "areaPrivativa": "Área privativa (ex: 65,40 m²)",
+      "areaTotal": "Área total do imóvel",
       "matriculaOrigem": "Número da matrícula ou transcrição de origem",
-      "programaHabitacional": "Informações sobre programa habitacional (ex: MCMV, CDHU, COHAB, etc)"
+      "programaHabitacional": "Informações de programas de moradia se houver"
     }
+
+    Texto bruto extraído do PDF:
+    ---
+    ${textoExtraido}
+    ---
 
     Contexto adicional de instruções do usuário:
     ${SYSTEM_PROMPT || ""}
@@ -32,75 +46,62 @@ export default async function handler(req, res) {
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: instrucaoForcada },
-            { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
-          ]
-        }]
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.1,
+        messages: [
+          {
+            role: "user",
+            content: instrucaoForcada
+          }
+        ]
       })
     });
 
     const data = await response.json();
 
     if (data.error) {
-      return res.status(500).json({ error: "Erro na API do Google: " + data.error.message });
+      return res.status(500).json({ error: "Erro na API Groq: " + data.error.message });
     }
 
-    const text = data.candidates[0].content.parts[0].text;
+    const text = data.choices[0].message.content.trim();
+    // Limpeza de qualquer tag markdown residual do JSON
     const jsonStr = text.replace(/```json|```/g, '').trim();
     const parsedData = JSON.parse(jsonStr);
 
-    // Mapeamento redundante: Garante que o frontend ache a chave que ele precisa, seja lá qual formato ele use
+    // Mapeamento de segurança idêntico para o seu frontend ler sem problemas
     const responseMapeada = {
-      // Matrícula
       matricula: parsedData.matricula || "",
       numeroMatricula: parsedData.matricula || "",
       numero_matricula: parsedData.matricula || "",
-      
-      // CNM
       cnm: parsedData.cnm || "",
-      
-      // Cartório
       cartorio: parsedData.cartorio || "",
       cartorio_comarca: parsedData.cartorio || "",
       cartorioComarca: parsedData.cartorio || "",
-      
-      // Endereço
       endereco: parsedData.endereco || "",
       endereco_descricao: parsedData.endereco || "",
       enderecoDescricao: parsedData.endereco || "",
-      
-      // Proprietário
       proprietario: parsedData.proprietario || "",
       proprietario_atual: parsedData.proprietario || "",
       proprietarioAtual: parsedData.proprietario || "",
-      
-      // Área Privativa
       areaPrivativa: parsedData.areaPrivativa || parsedData.area_privativa || "",
       area_privativa: parsedData.areaPrivativa || parsedData.area_privativa || "",
-      
-      // Área Total
       areaTotal: parsedData.areaTotal || parsedData.area_total || "",
       area_total: parsedData.areaTotal || parsedData.area_total || "",
-      
-      // Matrícula de Origem
       matriculaOrigem: parsedData.matriculaOrigem || parsedData.matricula_origem || "",
       matricula_origem: parsedData.matriculaOrigem || parsedData.matricula_origem || "",
-      
-      // Programa Habitacional
       programaHabitacional: parsedData.programaHabitacional || parsedData.programa_habitacional || "",
       programa_habitacional: parsedData.programaHabitacional || parsedData.programa_habitacional || "",
-      
-      // Metadados extras de segurança
       confianca: "Alta"
     };
 
     res.status(200).json(responseMapeada);
 
   } catch (error) {
-    res.status(500).json({ error: "Falha ao processar dados: " + error.message });
+    res.status(500).json({ error: "Falha ao processar dados com Groq: " + error.message });
   }
 }
