@@ -2,11 +2,10 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
 
   const { fileBase64, SYSTEM_PROMPT } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY; // Usa a chave do OpenRouter que você salvou aqui
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-001:generateContent?key=${apiKey}`;
+  const url = "https://openrouter.ai/api/v1/chat/completions";
 
-  // Forçamos o prompt de sistema a exigir a estrutura exata de chaves que o seu frontend lê
   const instrucaoForcada = `
     Você é um extrator de dados de PDFs de matrículas de imóveis.
     Extraia as informações do documento e retorne APENAS um objeto JSON plano (sem formatação markdown, sem crases, sem texto adicional).
@@ -31,26 +30,38 @@ export default async function handler(req, res) {
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://vercel.com', // Obrigatório para o OpenRouter gratuito
+        'X-Title': 'Extrator de Matriculas'
+      },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: instrucaoForcada },
-            { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
-          ]
-        }]
+        model: "google/gemini-2.0-flash-lite:free", // Modelo 100% gratuito e sem travas
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: instrucaoForcada },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:application/pdf;base64,${fileBase64}`
+                }
+              }
+            ]
+          }
+        ]
       })
     });
 
     const data = await response.json();
 
     if (data.error) {
-      return res.status(500).json({ error: "Erro na API do Google: " + data.error.message });
+      return res.status(500).json({ error: "Erro no OpenRouter: " + data.error.message });
     }
 
-    const text = data.candidates[0].content.parts[0].text;
-    
-    // Limpeza de marcações markdown (```json ... ```) caso o modelo teime em colocar
+    const text = data.choices[0].message.content;
     const jsonStr = text.replace(/```json|```/g, '').trim();
     
     res.status(200).json(JSON.parse(jsonStr));
