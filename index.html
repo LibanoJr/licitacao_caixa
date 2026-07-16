@@ -1,71 +1,284 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leitura de Matrículas</title>
-    <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; line-height: 1.6; }
-        .upload-area { border: 2px dashed #ccc; padding: 30px; text-align: center; margin-bottom: 20px; border-radius: 8px; }
-        button { background: #0070f3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        button:disabled { background: #ccc; }
-        #resultado { white-space: pre-wrap; background: #f4f4f4; padding: 15px; border-radius: 5px; margin-top: 20px; display: none; }
-        .erro { color: red; font-weight: bold; }
-        .sucesso { color: green; font-weight: bold; }
-    </style>
+<meta charset="UTF-8">
+<title>Leitura Automatizada de Matrículas — GEHPA 0012/2026-5688</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16273d; --ink-soft:#2e415a; --paper:#eef1ef; --paper-card:#f8f9f7;
+    --brass:#9c7a3c; --brass-soft:#c9a668; --brick:#a4402f; --brick-bg:#f5e6e2;
+    --verde:#3f6b52; --verde-bg:#e6ede9; --line:#d7dcd6;
+    --font-display:'Fraunces', serif; --font-mono:'JetBrains Mono', monospace; --font-ui:'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-ui); min-height:100vh;}
+  .wrap{max-width:900px;margin:0 auto;padding:0 24px 70px;}
+
+  header{background:var(--ink); color:var(--paper-card); padding:22px 24px 20px; border-bottom:5px solid var(--brass);}
+  .header-inner{max-width:900px;margin:0 auto;}
+  .eyebrow{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--brass-soft); margin:0 0 6px;}
+  h1{font-family:var(--font-display); font-weight:600; font-size:21px; line-height:1.25; margin:0 0 6px;}
+  .sub{font-size:12.5px; color:#c7d0da; max-width:620px; line-height:1.5;}
+
+  .ledger{background:var(--paper-card); border:1px solid var(--line); border-radius:2px; margin-top:-14px;
+    box-shadow:0 10px 22px -16px rgba(22,39,61,.35); padding:22px;}
+  .drop{border:1.5px dashed var(--brass-soft); border-radius:2px; padding:26px 18px; text-align:center; cursor:pointer; transition:background .15s, border-color .15s;}
+  .drop:hover, .drop.drag{background:var(--verde-bg); border-color:var(--verde);}
+  .drop svg{margin-bottom:8px;}
+  .drop-title{font-family:var(--font-display); font-size:15.5px; font-weight:500;}
+  .drop-sub{font-size:12px; color:#5a6a76; margin-top:3px;}
+  input[type=file]{display:none;}
+
+  .filelist{margin-top:14px;display:flex;flex-direction:column;gap:6px;}
+  .file-row{display:flex; align-items:center; justify-content:space-between; padding:8px 12px;
+    background:var(--paper); border:1px solid var(--line); font-family:var(--font-mono); font-size:11.5px;}
+  .file-row .name{color:var(--ink); overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;}
+  .status-pill{font-size:10px; padding:2px 8px; border-radius:20px; font-family:var(--font-ui); font-weight:600;}
+  .status-pending{background:#e5e7e2;color:#5a6a5f;}
+  .status-processing{background:#fbe9d4;color:#8a5a1a;}
+  .status-done{background:var(--verde-bg);color:var(--verde);}
+  .status-error{background:var(--brick-bg);color:var(--brick);}
+
+  .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  button{font-family:var(--font-ui); font-weight:600; font-size:12.5px; padding:10px 18px; border-radius:2px; border:none; cursor:pointer;}
+  button:disabled{opacity:.45; cursor:not-allowed;}
+  .btn-primary{background:var(--ink); color:#fff;}
+  .btn-primary:hover:not(:disabled){background:var(--ink-soft);}
+  .btn-ghost{background:transparent; color:var(--ink); border:1px solid var(--line);}
+  .btn-ghost:hover:not(:disabled){border-color:var(--ink);}
+
+  .results{margin-top:30px;display:flex;flex-direction:column;gap:20px;}
+  .ficha{background:var(--paper-card); border:1px solid var(--line); border-radius:2px; overflow:hidden;}
+  .ficha-head{display:flex; justify-content:space-between; align-items:flex-start; padding:16px 20px 12px; border-bottom:1px solid var(--line);}
+  .ficha-tipo{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.07em; color:var(--brass); text-transform:uppercase;}
+  .ficha-nome{font-family:var(--font-display); font-size:15.5px; font-weight:500; margin-top:3px;}
+  .badge-caixa{display:inline-block; margin-top:5px; font-family:var(--font-mono); font-size:10px; font-weight:700;
+    background:var(--ink); color:#fff; padding:2px 8px; border-radius:2px; letter-spacing:.04em;}
+  .stamp{font-family:var(--font-mono); font-weight:700; font-size:9.5px; letter-spacing:.08em; color:var(--verde);
+    border:2px solid var(--verde); border-radius:50%; width:52px;height:52px; display:flex;align-items:center;justify-content:center;
+    text-align:center; transform:rotate(-11deg) scale(0); flex-shrink:0; animation:stamp-in .35s cubic-bezier(.2,1.4,.5,1) forwards; animation-delay:.15s;}
+  @keyframes stamp-in{to{transform:rotate(-11deg) scale(1);}}
+  @media (prefers-reduced-motion: reduce){.stamp{animation:none;transform:rotate(-11deg) scale(1);}}
+
+  .campos{padding:14px 20px; display:grid; grid-template-columns:1fr 1fr; gap:11px 22px;}
+  .campo{border-bottom:1px dotted var(--line); padding-bottom:7px;}
+  .campo.full{grid-column:1/-1;}
+  .campo .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72;}
+  .campo .valor{font-size:13px; margin-top:2px; line-height:1.4;}
+
+  .historico{margin:0 20px 14px;}
+  .historico .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72; margin-bottom:5px;}
+  .historico ul{margin:0; padding-left:16px; font-size:12.5px; line-height:1.5;}
+
+  .alertas{margin:0 20px 14px; background:var(--brick-bg); border-left:3px solid var(--brick); padding:10px 14px;}
+  .alertas .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--brick); font-weight:700;}
+  .alertas ul{margin:5px 0 0; padding-left:16px; font-size:12.5px; line-height:1.5;}
+
+  .valores{margin:0 20px 14px; font-size:12.5px;}
+  .valores .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72; margin-bottom:5px;}
+
+  .confianca{padding:10px 20px 16px; font-size:11px; color:#6b7a72; font-family:var(--font-mono);}
+  .empty{text-align:center; padding:40px 20px; color:#7a887f; font-size:12.5px;}
+  footer{max-width:900px;margin:34px auto 0;padding:0 24px; font-size:11px; color:#7a887f; font-family:var(--font-mono);}
+</style>
 </head>
 <body>
 
-    <h2>Extração de Dados de PDF (Matrículas)</h2>
-    
-    <form id="pdfForm">
-        <div class="upload-area">
-            <input type="file" id="pdfFile" accept="application/pdf" required>
-            <p>Selecione o arquivo <strong>8787701133965.pdf</strong> ou outro PDF.</p>
+<header>
+  <div class="header-inner">
+    <p class="eyebrow">Caixa Econômica Federal · Edital 0012/2026-5688 · Precificação GEHPA</p>
+    <h1>Leitura automatizada de matrículas e documentos</h1>
+    <p class="sub">Envie o PDF da matrícula ou certidão. A leitura identifica o proprietário atual, ônus vigentes e valores relevantes para a precificação.</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="ledger">
+    <div class="drop" id="drop">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9c7a3c" stroke-width="1.6"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+      <div class="drop-title">Solte os PDFs aqui ou clique para selecionar</div>
+      <div class="drop-sub">Aceita múltiplos arquivos · matrícula, certidão de inteiro teor, IPTU, laudo</div>
+      <input type="file" id="fileInput" accept="application/pdf" multiple>
+    </div>
+
+    <div class="filelist" id="fileList"></div>
+
+    <div class="actions">
+      <button class="btn-primary" id="processBtn" disabled>Processar documentos</button>
+      <button class="btn-ghost" id="exportBtn" disabled>Exportar CSV</button>
+      <button class="btn-ghost" id="clearBtn" disabled>Limpar</button>
+    </div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="empty">Os resultados da leitura aparecerão aqui após o processamento.</div>
+  </div>
+</div>
+
+<footer>GEHPA · leitura assistida por IA — validar sempre os dados críticos com o documento original antes do uso na precificação.</footer>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const processBtn = document.getElementById('processBtn');
+const exportBtn = document.getElementById('exportBtn');
+const clearBtn = document.getElementById('clearBtn');
+const resultsEl = document.getElementById('results');
+
+let files = [];
+
+function renderFileList(){
+  fileListEl.innerHTML = '';
+  files.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const pillClass = {pending:'status-pending',processing:'status-processing',done:'status-done',error:'status-error'}[f.status];
+    const pillText = {pending:'aguardando',processing:'lendo...',done:'concluído',error:'erro'}[f.status];
+    row.innerHTML = `<span class="name">${f.file.name}</span><span class="status-pill ${pillClass}">${pillText}</span>`;
+    fileListEl.appendChild(row);
+  });
+  processBtn.disabled = files.length === 0 || files.every(f => f.status === 'done');
+  clearBtn.disabled = files.length === 0;
+}
+
+function addFiles(newFiles){
+  [...newFiles].forEach(file => {
+    if (file.type === 'application/pdf') files.push({file, status:'pending', data:null, error:null});
+  });
+  renderFileList();
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => addFiles(e.target.files));
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => {e.preventDefault(); drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {e.preventDefault(); drop.classList.remove('drag');}));
+drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+clearBtn.addEventListener('click', () => {
+  files = [];
+  renderFileList();
+  resultsEl.innerHTML = '<div class="empty">Os resultados da leitura aparecerão aqui após o processamento.</div>';
+  exportBtn.disabled = true;
+});
+
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onerror = () => reject(new Error('Falha ao ler arquivo'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function processFile(entry){
+  entry.status = 'processing';
+  renderFileList();
+  try {
+    const base64 = await fileToBase64(entry.file);
+    const response = await fetch('/api/extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ fileBase64: base64 })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Erro na leitura');
+    entry.data = result;
+    entry.status = 'done';
+  } catch (err) {
+    entry.status = 'error';
+    entry.error = err.message;
+  }
+  renderFileList();
+  renderResults();
+}
+
+function esc(v){ return (v === null || v === undefined || v === '') ? '—' : String(v); }
+
+function renderResults(){
+  const done = files.filter(f => f.status === 'done' || f.status === 'error');
+  if (done.length === 0) return;
+  resultsEl.innerHTML = '';
+  done.forEach(entry => {
+    const card = document.createElement('div');
+    card.className = 'ficha';
+    if (entry.status === 'error') {
+      card.innerHTML = `<div class="ficha-head"><div><div class="ficha-tipo">Erro na leitura</div><div class="ficha-nome">${entry.file.name}</div></div></div>
+        <div class="alertas"><div class="label">Falha</div><div style="font-size:12.5px;margin-top:5px;">${esc(entry.error)}</div></div>`;
+      resultsEl.appendChild(card);
+      return;
+    }
+    const d = entry.data;
+    const hist = d.historico_atos_relevantes || [];
+    const onusAtivos = d.onus_ativos || [];
+    const onusCancelados = d.onus_cancelados || [];
+    const valores = d.valores_mencionados || [];
+    const alertas = d.alertas || [];
+
+    card.innerHTML = `
+      <div class="ficha-head">
+        <div>
+          <div class="ficha-tipo">Matrícula ${esc(d.numero_matricula)} · ${esc(d.tipo_imovel)}</div>
+          <div class="ficha-nome">${entry.file.name}</div>
+          ${d.imovel_pertence_caixa ? '<span class="badge-caixa">Propriedade atual: CAIXA</span>' : ''}
         </div>
-        <button type="submit" id="btnEnviar">Extrair Dados</button>
-    </form>
+        <div class="stamp">LIDO<br>OK</div>
+      </div>
+      <div class="campos">
+        <div class="campo"><div class="label">CNM</div><div class="valor">${esc(d.cnm)}</div></div>
+        <div class="campo"><div class="label">Cartório / Comarca</div><div class="valor">${esc(d.cartorio_nome)}${d.comarca_uf ? ' — ' + esc(d.comarca_uf) : ''}</div></div>
+        <div class="campo full"><div class="label">Endereço / Descrição</div><div class="valor">${esc(d.endereco_completo)}</div></div>
+        <div class="campo full"><div class="label">Proprietário atual</div><div class="valor">${esc(d.proprietario_atual_nome)}${d.proprietario_atual_documento ? ' — ' + esc(d.proprietario_atual_documento) : ''}</div></div>
+        <div class="campo"><div class="label">Área privativa</div><div class="valor">${esc(d.area_privativa_m2)}</div></div>
+        <div class="campo"><div class="label">Área total</div><div class="valor">${esc(d.area_total_m2)}</div></div>
+        <div class="campo"><div class="label">Matrícula de origem</div><div class="valor">${esc(d.matricula_origem)}</div></div>
+        <div class="campo"><div class="label">Programa habitacional</div><div class="valor">${esc(d.programa_habitacional)}</div></div>
+      </div>
+      ${hist.length ? `<div class="historico"><div class="label">Histórico relevante</div><ul>${hist.map(h=>`<li><strong>${esc(h.codigo)}</strong> (${esc(h.data)}) — ${esc(h.tipo)}: ${esc(h.resumo)}</li>`).join('')}</ul></div>` : ''}
+      ${valores.length ? `<div class="valores"><div class="label">Valores mencionados</div><ul style="margin:0;padding-left:16px;">${valores.map(v=>`<li>${esc(v.tipo)}: ${esc(v.valor)}</li>`).join('')}</ul></div>` : ''}
+      ${onusAtivos.length ? `<div class="alertas"><div class="label">Ônus / gravames ativos</div><ul>${onusAtivos.map(o=>`<li>${esc(o)}</li>`).join('')}</ul></div>` : ''}
+      ${onusCancelados.length ? `<div class="historico"><div class="label">Ônus já cancelados</div><ul>${onusCancelados.map(o=>`<li>${esc(o)}</li>`).join('')}</ul></div>` : ''}
+      ${alertas.length ? `<div class="alertas"><div class="label">Alertas para a precificação</div><ul>${alertas.map(a=>`<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+      <div class="confianca">Confiança da extração: ${esc(d.confianca_extracao)}</div>
+    `;
+    resultsEl.appendChild(card);
+  });
+  exportBtn.disabled = done.filter(f=>f.status==='done').length === 0;
+}
 
-    <div id="status"></div>
-    <pre id="resultado"></pre>
+processBtn.addEventListener('click', async () => {
+  processBtn.disabled = true;
+  const pending = files.filter(f => f.status === 'pending' || f.status === 'error');
+  for (const entry of pending) await processFile(entry);
+  processBtn.disabled = files.every(f => f.status === 'done');
+});
 
-    <script>
-        document.getElementById('pdfForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const fileInput = document.getElementById('pdfFile');
-            const statusDiv = document.getElementById('status');
-            const resultadoPre = document.getElementById('resultado');
-            const btn = document.getElementById('btnEnviar');
-            
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-
-            try {
-                btn.disabled = true;
-                statusDiv.innerHTML = 'Processando...';
-                
-                const response = await fetch('/api/extract', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const dados = await response.json();
-
-                // FORÇAMOS A EXIBIÇÃO: Independentemente do que venha, vamos mostrar no console e na tela
-                console.log("Resposta bruta da API:", dados);
-                
-                statusDiv.innerHTML = 'Extração concluída!';
-                resultadoPre.style.display = 'block';
-                // Pega o que vier em 'resultado' ou 'conteudo'
-                resultadoPre.textContent = dados.resultado || dados.conteudo || "Nenhum dado retornado pela IA.";
-
-            } catch (erro) {
-                statusDiv.innerHTML = `FALHA: ${erro.message}`;
-            } finally {
-                btn.disabled = false;
-            }
-        });
-    </script>
+exportBtn.addEventListener('click', () => {
+  const done = files.filter(f => f.status === 'done');
+  const headers = ['arquivo','numero_matricula','tipo_imovel','endereco_completo','proprietario_atual_nome','proprietario_atual_documento','imovel_pertence_caixa','area_privativa_m2','area_total_m2','onus_ativos','valores_mencionados','alertas','confianca_extracao'];
+  const rows = done.map(f => {
+    const d = f.data;
+    const vals = [
+      f.file.name, d.numero_matricula, d.tipo_imovel, d.endereco_completo,
+      d.proprietario_atual_nome, d.proprietario_atual_documento, d.imovel_pertence_caixa,
+      d.area_privativa_m2, d.area_total_m2,
+      (d.onus_ativos||[]).join('; '),
+      (d.valores_mencionados||[]).map(v=>`${v.tipo}: ${v.valor}`).join('; '),
+      (d.alertas||[]).join('; '), d.confianca_extracao
+    ];
+    return vals.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',');
+  });
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'extracao_matriculas_gehpa.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
 </body>
 </html>
