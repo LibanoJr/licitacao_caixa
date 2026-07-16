@@ -6,19 +6,9 @@ export default async function handler(req) {
   try {
     const formData = await req.formData();
     const file = formData.get('file');
-    
-    // A Groq não aceita arquivos diretamente como o Google. 
-    // Como estamos em um ambiente limitado (Edge), vamos extrair o texto de forma simples.
-    // Se o PDF for um texto comum, o código abaixo processa.
-    const textContent = await file.text(); 
+    if (!file) throw new Error("Arquivo não recebido");
 
-    const requestBody = {
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: "Extraia os dados em JSON." },
-        { role: "user", content: `Analise este conteúdo e extraia os dados estruturados: ${textContent}` }
-      ]
-    };
+    const textContent = await file.text();
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: 'POST',
@@ -26,16 +16,20 @@ export default async function handler(req) {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: `Extraia dados deste texto: ${textContent}` }]
+      })
     });
 
     const data = await response.json();
-    
-    // CORREÇÃO DA ESTRUTURA GROQ: 
-    // A resposta fica dentro de choices[0].message.content
-    const resultado = data.choices[0].message.content;
 
-    return new Response(JSON.stringify({ resultado }), {
+    // AQUI ESTÁ A BLINDAGEM: Se a estrutura mudar, ele vai te dizer EXATAMENTE o que veio
+    if (!data.choices || data.choices.length === 0) {
+      return new Response(JSON.stringify({ error: "Resposta da API inesperada", raw: data }), { status: 500 });
+    }
+
+    return new Response(JSON.stringify({ resultado: data.choices[0].message.content }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
