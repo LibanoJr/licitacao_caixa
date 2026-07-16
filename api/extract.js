@@ -1,68 +1,95 @@
 /**
  * Arquivo: api/extract.js
- * Descrição: Código corrigido e blindado contra erros de padrão de string na leitura de PDFs.
+ * Descrição: Manipulador de API nativo para ambiente Web/Edge (sem dependências externas)
  */
 
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const fs = require("fs");
-const path = require("path");
-
-// Inicializa a API do Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+export const config = {
+  runtime: 'edge', // Garante a compatibilidade se estiver na Vercel
+};
 
 /**
- * Converte de forma segura o PDF em Base64 purificado, removendo qualquer quebra de padrão
+ * Função principal que o seu index.html chama via requisição
  */
-function fileToGenerativePart(caminhoAbsoluto, mimeType) {
-  try {
-    // Leitura síncrona do arquivo
-    const arquivoBuffer = fs.readFileSync(caminhoAbsoluto);
-    
-    // Converte para base64 limpando espaços ou caracteres residuais
-    const base64Dados = arquivoBuffer.toString("base64").trim();
-
-    return {
-      inlineData: {
-        data: base64Dados,
-        mimeType: mimeType
-      },
-    };
-  } catch (erroLeitura) {
-    console.error("[Erro na Leitura Física do Arquivo]:", erroLeitura);
-    throw new Error(`Não foi possível ler o arquivo no caminho especificado. Verifique se ele existe.`);
+export default async function handler(req) {
+  // 1. Valida se o método é POST
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Método não permitido' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
-}
 
-/**
- * Função principal de extração
- */
-async function processarEExtrairPDF(caminhoDoPdf, promptExtracao) {
   try {
-    // Resolve o caminho do arquivo para garantir que seja um caminho absoluto válido no sistema
-    const caminhoResolvido = path.resolve(caminhoDoPdf);
-    
-    // Gera a part com os dados limpos
-    const pdfPart = fileToGenerativePart(caminhoResolvido, "application/pdf");
+    // 2. Recupera o arquivo enviado via FormData (do seu formulário no index.html)
+    const formData = await req.formData();
+    const file = formData.get('file'); // O input do arquivo deve ter o name="file"
+    const promptText = formData.get('prompt') || 'Extraia os dados deste PDF em formato JSON.';
 
-    // Instancia o modelo estável
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    if (!file) {
+      return new Response(JSON.stringify({ error: 'Nenhum arquivo enviado.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    // Envia para a API do Google
-    const result = await model.generateContent([pdfPart, promptExtracao]);
-    const response = await result.response;
+    // 3. Converte o PDF recebido diretamente para a string Base64 limpa
+    const arrayBuffer = await file.arrayBuffer();
+    const base64Data = btoa(
+      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    );
+
+    // 4. Monta o corpo da requisição exatamente no padrão esperado pelo Gemini 1.5 Flash
+    const requestBody = {
+      contents: [
+        {
+          parts: [
+            {
+              inlineData: {
+                mimeType: "application/pdf",
+                data: base64Data
+              }
+            },
+            {
+              text: promptText
+            }
+          ]
+        }
+      ]
+    };
+
+    const apiKey = process.env.GEMINI_API_KEY;
     
-    return response.text();
+    // 5. Chamada HTTP direta usando o endpoint v1beta com o modelo ESTÁVEL
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || 'Falha na comunicação com o Gemini');
+    }
+
+    const data = await response.json();
+    
+    // Retorna o texto extraído de volta para a sua interface html
+    const textoExtraido = data.candidates[0].content.parts[0].text;
+
+    return new Response(JSON.stringify({ resultado: textoExtraido }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
 
   } catch (error) {
-    // Captura o erro exato e trata a mensagem do "expected pattern"
-    if (error.message && error.message.includes("pattern")) {
-      console.error("[Erro de Padrão]: O formato da string enviada para o Gemini falhou.");
-    }
-    console.error("[Erro Geral na API]:", error);
-    throw error;
+    console.error('[Erro na API]:', error.message);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
-
-module.exports = {
-  processarEExtrairPDF
-};
