@@ -6,14 +6,32 @@ export default async function handler(req, res) {
 
   const url = "https://api.groq.com/openai/v1/chat/completions";
 
-  // Extração e limpeza agressiva de lixo binário do PDF
+  // Extrator ultraleve de texto interno de PDF binário
   let textoExtraido = "";
   try {
     const buffer = Buffer.from(fileBase64, 'base64');
-    textoExtraido = buffer.toString('utf-8')
-      .replace(/[^\x20-\x7E\n]/g, '') // Remove caracteres não-ASCII/binários
-      .replace(/\s+/g, ' ')           // Remove espaços e quebras de linha duplicadas
-      .substring(0, 6000);            // Limita aos primeiros 6000 caracteres (evita estourar a cota)
+    const pdfString = buffer.toString('binary');
+    
+    // Captura blocos de texto comuns em PDFs estruturados (comandos Tj e TJ)
+    const regex = /\(([^)]+)\)\s*Tj/g;
+    let matches;
+    let stringsEncontradas = [];
+    
+    while ((matches = regex.exec(pdfString)) !== null) {
+      stringsEncontradas.push(matches[1]);
+    }
+    
+    textoExtraido = stringsEncontradas.join(' ');
+
+    // Fallback simples caso o PDF use compressão e a busca direta por Tj falhe
+    if (textoExtraido.trim().length < 50) {
+      textoExtraido = pdfString
+        .replace(/[^\x20-\x7E\n]/g, '') // Remove caracteres binários não-ASCII
+        .replace(/\s+/g, ' ')           // Remove espaços duplicados
+        .substring(0, 5000);            // Limita tamanho
+    } else {
+      textoExtraido = textoExtraido.substring(0, 5000);
+    }
   } catch (e) {
     textoExtraido = "Falha ao extrair texto.";
   }
@@ -37,7 +55,7 @@ export default async function handler(req, res) {
       "programaHabitacional": "Informações de programas de moradia se houver"
     }
 
-    Texto bruto extraído do PDF:
+    Texto extraído do PDF:
     ---
     ${textoExtraido}
     ---
@@ -54,7 +72,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "llama-3.1-8b-instant", // Modelo leve, rápido e com alto limite de tokens por minuto (TPM)
         temperature: 0.1,
         messages: [
           {
