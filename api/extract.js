@@ -2,17 +2,20 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
 
   const { fileBase64, SYSTEM_PROMPT } = req.body;
-  const apiKey = process.env.GEMINI_API_KEY; // Sua chave da Groq (gsk_...) cadastrada na Vercel
+  const apiKey = process.env.GEMINI_API_KEY; // Sua chave da Groq (gsk_...)
 
   const url = "https://api.groq.com/openai/v1/chat/completions";
 
-  // Extração básica de texto do Base64 do PDF
+  // Extração e limpeza agressiva de lixo binário do PDF
   let textoExtraido = "";
   try {
     const buffer = Buffer.from(fileBase64, 'base64');
-    textoExtraido = buffer.toString('utf-8').replace(/[^\x20-\x7E\s]/g, '');
+    textoExtraido = buffer.toString('utf-8')
+      .replace(/[^\x20-\x7E\n]/g, '') // Remove caracteres não-ASCII/binários
+      .replace(/\s+/g, ' ')           // Remove espaços e quebras de linha duplicadas
+      .substring(0, 6000);            // Limita aos primeiros 6000 caracteres (evita estourar a cota)
   } catch (e) {
-    textoExtraido = "Falha ao extrair texto direto.";
+    textoExtraido = "Falha ao extrair texto.";
   }
 
   const instrucaoForcada = `
