@@ -1,34 +1,36 @@
 # Leitura Automatizada de Matrículas — GEHPA
 
-## O que é
-- `public/index.html` — a página que qualquer pessoa acessa e envia os PDFs.
-- `api/extract.js` — função de servidor (roda na Vercel) que lê o PDF usando a IA e devolve os dados extraídos. É aqui que fica a chave de API, protegida — nunca no navegador do usuário.
+Solução definitiva: **Google Gemini** (`gemini-3.1-flash-lite`) — gratuito, lê PDF nativamente, saída em JSON estruturado garantido (`responseSchema`).
 
-## Passo a passo para publicar (gratuito)
+## Estrutura
+- `index.html` — a página. Não precisa mexer em nada aqui.
+- `api/extract.js` — toda a lógica de leitura mora aqui: o prompt, o formato dos dados e a chamada pro Gemini já estão fixos dentro do arquivo. O front-end só manda o PDF.
 
-### 1. Pegar uma chave de API da Anthropic
-1. Acesse https://console.anthropic.com
-2. Crie uma conta (ou entre na conta já usada pela equipe/projeto).
-3. Vá em **API Keys** e crie uma chave.
-4. Adicione crédito na conta (Billing) — o uso da API é cobrado por uso, separado de qualquer plano do Claude.ai.
+## Passo a passo (defintivo)
 
-### 2. Subir este código para o GitHub
-1. Crie um repositório novo no GitHub.
-2. Envie esta pasta inteira (`public/`, `api/`, `package.json`) para o repositório.
+### 1. No projeto da Vercel
+1. Acesse o seu projeto em vercel.com → **Settings → Environment Variables**.
+2. Confirme que existe **apenas** esta variável (remova `ANTHROPIC_API_KEY` se ela ainda estiver lá, de uma tentativa anterior, pra não confundir):
+   - Nome: `GEMINI_API_KEY`
+   - Valor: sua chave gerada em https://aistudio.google.com/apikey
+3. Salve.
 
-### 3. Publicar na Vercel
-1. Acesse https://vercel.com e crie uma conta gratuita (pode entrar direto com o GitHub).
-2. Clique em **Add New → Project** e selecione o repositório que você acabou de criar.
-3. Antes de finalizar o deploy, vá em **Environment Variables** e adicione:
-   - Nome: `ANTHROPIC_API_KEY`
-   - Valor: a chave que você gerou no passo 1
-4. Clique em **Deploy**.
-5. Em alguns segundos a Vercel gera um link público, algo como `https://leitura-matriculas-gehpa.vercel.app` — esse é o link que qualquer pessoa da equipe pode acessar.
+### 2. No repositório
+1. Substitua o `index.html` da raiz do repositório pelo arquivo anexado.
+2. Substitua o `api/extract.js` pelo arquivo anexado.
+3. Commit e push:
+```
+git add .
+git commit -m "fix definitivo: schema Gemini + prompt fixo no backend"
+git push
+```
+4. A Vercel faz o redeploy sozinha. Acompanhe em vercel.com → seu projeto → Deployments até aparecer "Ready".
 
-### 4. Testar
-- Acesse o link gerado, envie um PDF de matrícula e confira o resultado.
-- Se der erro "ANTHROPIC_API_KEY não configurada", confira se a variável foi salva certinho e refaça o deploy (Vercel → Deployments → Redeploy).
+### 3. Testar
+Acesse `https://licitacao-caixa.vercel.app`, envie um PDF de matrícula e confira se os campos aparecem preenchidos (não mais com "—").
 
-## Limites a ter em mente
-- O plano gratuito (Hobby) da Vercel aceita requisições de até ~4,5 MB — como as certidões têm poucas páginas, isso costuma ser suficiente, mas um PDF muito grande (dezenas de páginas escaneadas em alta resolução) pode esbarrar nesse limite.
-- A IA não é infalível em 100% dos casos — o campo `confianca_extracao` de cada documento serve exatamente para sinalizar quando vale a pena conferir manualmente antes de usar o dado na precificação.
+## Por que não usar o Groq aqui
+O Groq não lê PDF diretamente — seria necessário converter cada página em imagem antes de enviar (uma etapa a mais, com mais chance de falha). Gemini e Claude leem o PDF direto, o que é mais simples e mais confiável para este caso, que exige o mínimo de erro possível.
+
+## Se algo ainda falhar
+Copie a mensagem de erro exibida na tela (agora ela vem detalhada — modelo, motivo de bloqueio, ou trecho da resposta que não virou JSON) e me manda — ela já indica exatamente onde está o problema.
