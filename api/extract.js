@@ -9,7 +9,14 @@ Leia cuidadosamente TODO o histórico de atos, na ordem em que aparecem, antes d
 
 Só inclua em historico_atos_relevantes os atos que mudam propriedade, criam/cancelam ônus, ou fixam valores (ignore atos puramente administrativos, como averbação de código do imóvel). Limite a 8 itens.
 
-Se um campo não existir no documento, use null ou lista vazia. Nunca invente informação que não esteja no texto.`;
+Se um campo não existir no documento, use null ou lista vazia. Nunca invente informação que não esteja no texto.
+
+Critério para confianca_extracao (aplique com rigor — na dúvida entre dois níveis, escolha sempre o mais baixo):
+- "baixa": há texto ilegível, cortado, borrado, páginas faltando, ou informação central (proprietário atual, ônus ativos) ambígua ou conflitante entre trechos do documento.
+- "media": o essencial (proprietário atual, ônus ativos) está claro, mas algum campo secundário (área, endereço completo, valores) está incerto, parcialmente ilegível ou precisou ser inferido.
+- "alta": todos os campos relevantes estão claramente legíveis, sem ambiguidade e sem necessidade de inferência.
+
+Critério para imovel_pertence_caixa: só marque true ou false se o texto permitir concluir isso com segurança. Se não for possível determinar com confiança se a Caixa Econômica Federal é a proprietária atual, retorne null e explique o motivo em 'alertas' — não arrisque um chute nesse campo, ele é usado para decisão de leilão.`;
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -28,7 +35,7 @@ const RESPONSE_SCHEMA = {
     vaga_garagem: { type: "BOOLEAN", nullable: true },
     proprietario_atual_nome: { type: "STRING", nullable: true },
     proprietario_atual_documento: { type: "STRING", nullable: true },
-    imovel_pertence_caixa: { type: "BOOLEAN" },
+    imovel_pertence_caixa: { type: "BOOLEAN", nullable: true },
     matricula_origem: { type: "STRING", nullable: true },
     programa_habitacional: { type: "STRING", nullable: true },
     historico_atos_relevantes: {
@@ -61,8 +68,38 @@ const RESPONSE_SCHEMA = {
   required: ["numero_matricula", "tipo_imovel", "imovel_pertence_caixa", "confianca_extracao"]
 };
 
+// Tenta a chamada ao Gemini com retry/backoff quando o tier gratuito
+// devolve 429 (limite de requisições por minuto atingido).
+async function callGeminiWithRetry(url, body, maxRetries = 2) {
+  let lastResponse;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (response.status !== 429) return response;
+    lastResponse = response;
+    if (attempt < maxRetries) {
+      const waitMs = 1500 * Math.pow(2, attempt); // 1.5s, 3s
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+  }
+  return lastResponse;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Método não permitido');
+
+  // Chave de acesso simples — só ativa se APP_ACCESS_KEY estiver configurada
+  // na Vercel. Sem ela configurada, o endpoint continua aberto (como estava).
+  const expectedKey = process.env.APP_ACCESS_KEY;
+  if (expectedKey) {
+    const providedKey = req.headers['x-app-key'];
+    if (providedKey !== expectedKey) {
+      return res.status(401).json({ error: 'Chave de acesso inválida ou ausente. Confirme a chave com quem coordena o teste.' });
+    }
+  }
 
   const { fileBase64 } = req.body || {};
   if (!fileBase64) {
@@ -77,22 +114,22 @@ export default async function handler(req, res) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
 
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: SYSTEM_PROMPT + "\n\nExtraia os dados deste documento conforme o schema fornecido." },
-            { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
-          ]
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA
-        }
-      })
+    const response = await callGeminiWithRetry(url, {
+      contents: [{
+        parts: [
+          { text: SYSTEM_PROMPT + "\n\nExtraia os dados deste documento conforme o schema fornecido." },
+          { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
+        ]
+      }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA
+      }
     });
+
+    if (response.status === 429) {
+      return res.status(429).json({ error: 'Limite de requisições do Gemini (tier gratuito) atingido. Aguarde cerca de 1 minuto e tente novamente.' });
+    }
 
     const data = await response.json();
 
