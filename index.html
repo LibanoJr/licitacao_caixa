@@ -25,6 +25,10 @@
 
   .ledger{background:var(--paper-card); border:1px solid var(--line); border-radius:2px; margin-top:-14px;
     box-shadow:0 10px 22px -16px rgba(22,39,61,.35); padding:22px;}
+
+  .access-row{display:flex; align-items:flex-end; gap:10px; margin-bottom:18px; padding-bottom:16px; border-bottom:1px dashed var(--line);}
+  .access-row .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72; margin-bottom:4px; display:block;}
+
   .drop{border:1.5px dashed var(--brass-soft); border-radius:2px; padding:26px 18px; text-align:center; cursor:pointer; transition:background .15s, border-color .15s;}
   .drop:hover, .drop.drag{background:var(--verde-bg); border-color:var(--verde);}
   .drop svg{margin-bottom:8px;}
@@ -69,6 +73,13 @@
   .campo .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72;}
   .campo .valor{font-size:13px; margin-top:2px; line-height:1.4;}
 
+  .edit-input{width:100%; font-family:var(--font-ui); font-size:13px; color:var(--ink); background:#fff;
+    border:1px solid var(--line); border-radius:2px; padding:5px 7px; margin-top:3px;}
+  .edit-input:focus{outline:none; border-color:var(--brass); background:#fffdf8;}
+  textarea.edit-input{resize:vertical; font-family:var(--font-ui);}
+  select.edit-input{cursor:pointer;}
+  .edit-hint{font-family:var(--font-mono); font-size:9px; color:var(--brass); margin-top:6px; letter-spacing:.03em;}
+
   .historico{margin:0 20px 14px;}
   .historico .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72; margin-bottom:5px;}
   .historico ul{margin:0; padding-left:16px; font-size:12.5px; line-height:1.5;}
@@ -79,6 +90,9 @@
 
   .valores{margin:0 20px 14px; font-size:12.5px;}
   .valores .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:#6b7a72; margin-bottom:5px;}
+
+  .correcao{margin:0 20px 16px; background:#f2eee3; border-left:3px solid var(--brass); padding:10px 14px;}
+  .correcao .label{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--brass); font-weight:700; margin-bottom:5px;}
 
   .confianca{padding:10px 20px 16px; font-size:11px; color:#6b7a72; font-family:var(--font-mono);}
   .empty{text-align:center; padding:40px 20px; color:#7a887f; font-size:12.5px;}
@@ -91,12 +105,19 @@
   <div class="header-inner">
     <p class="eyebrow">Caixa Econômica Federal · Edital 0012/2026-5688 · Precificação GEHPA</p>
     <h1>Leitura automatizada de matrículas e documentos</h1>
-    <p class="sub">Envie o PDF da matrícula ou certidão. A leitura identifica o proprietário atual, ônus vigentes e valores relevantes para a precificação.</p>
+    <p class="sub">Envie o PDF da matrícula ou certidão. A leitura identifica o proprietário atual, ônus vigentes e valores relevantes para a precificação. Confira e corrija os campos antes de exportar.</p>
   </div>
 </header>
 
 <div class="wrap">
   <div class="ledger">
+    <div class="access-row">
+      <div style="flex:1;max-width:280px;">
+        <span class="label">Chave de acesso</span>
+        <input class="edit-input" id="accessKeyInput" type="password" placeholder="fornecida pela equipe">
+      </div>
+    </div>
+
     <div class="drop" id="drop">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9c7a3c" stroke-width="1.6"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
       <div class="drop-title">Solte os PDFs aqui ou clique para selecionar</div>
@@ -118,7 +139,7 @@
   </div>
 </div>
 
-<footer>GEHPA · leitura assistida por IA — validar sempre os dados críticos com o documento original antes do uso na precificação.</footer>
+<footer>GEHPA · leitura assistida por IA — confira e corrija os campos abaixo antes de exportar; a correção vira dado de referência para melhorar o modelo.</footer>
 
 <script>
 const drop = document.getElementById('drop');
@@ -128,8 +149,23 @@ const processBtn = document.getElementById('processBtn');
 const exportBtn = document.getElementById('exportBtn');
 const clearBtn = document.getElementById('clearBtn');
 const resultsEl = document.getElementById('results');
+const accessKeyInput = document.getElementById('accessKeyInput');
 
 let files = [];
+let uidCounter = 0;
+const LARGE_FILE_BYTES = 3.3 * 1024 * 1024; // acima disso, risco de estourar o limite de corpo da Vercel (base64 infla ~33%)
+
+function escapeHtml(v){
+  if (v === null || v === undefined || v === '') return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+function esc(v){ return (v === null || v === undefined || v === '') ? '—' : escapeHtml(v); }
+function escAttr(v){ return escapeHtml(v === null || v === undefined ? '' : v); }
 
 function renderFileList(){
   fileListEl.innerHTML = '';
@@ -138,7 +174,8 @@ function renderFileList(){
     row.className = 'file-row';
     const pillClass = {pending:'status-pending',processing:'status-processing',done:'status-done',error:'status-error'}[f.status];
     const pillText = {pending:'aguardando',processing:'lendo...',done:'concluído',error:'erro'}[f.status];
-    row.innerHTML = `<span class="name">${f.file.name}</span><span class="status-pill ${pillClass}">${pillText}</span>`;
+    const largeTag = f.large ? ' <span style="color:var(--brick);font-weight:700;">(arquivo grande — pode falhar)</span>' : '';
+    row.innerHTML = `<span class="name">${escapeHtml(f.file.name)}${largeTag}</span><span class="status-pill ${pillClass}">${pillText}</span>`;
     fileListEl.appendChild(row);
   });
   processBtn.disabled = files.length === 0 || files.every(f => f.status === 'done');
@@ -147,7 +184,9 @@ function renderFileList(){
 
 function addFiles(newFiles){
   [...newFiles].forEach(file => {
-    if (file.type === 'application/pdf') files.push({file, status:'pending', data:null, error:null});
+    if (file.type === 'application/pdf') {
+      files.push({ file, status:'pending', data:null, error:null, uid:'u'+(uidCounter++), large: file.size > LARGE_FILE_BYTES });
+    }
   });
   renderFileList();
 }
@@ -175,13 +214,17 @@ function fileToBase64(file){
 }
 
 async function processFile(entry){
+  // remove card antigo se for reprocessamento (evita ficha "erro" travada na tela)
+  const oldCard = document.getElementById('card-'+entry.uid);
+  if (oldCard) oldCard.remove();
+
   entry.status = 'processing';
   renderFileList();
   try {
     const base64 = await fileToBase64(entry.file);
     const response = await fetch('/api/extract', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'x-app-key': accessKeyInput.value.trim()},
       body: JSON.stringify({ fileBase64: base64 })
     });
     const result = await response.json();
@@ -196,53 +239,81 @@ async function processFile(entry){
   renderResults();
 }
 
-function esc(v){ return (v === null || v === undefined || v === '') ? '—' : String(v); }
+function fieldId(uid, field){ return `f-${uid}-${field}`; }
 
 function renderResults(){
   const done = files.filter(f => f.status === 'done' || f.status === 'error');
   if (done.length === 0) return;
-  resultsEl.innerHTML = '';
+  const emptyMsg = resultsEl.querySelector('.empty');
+  if (emptyMsg) resultsEl.innerHTML = '';
+
   done.forEach(entry => {
+    // não recria cards já renderizados — preserva edições feitas pelo usuário
+    // enquanto outros arquivos ainda estão sendo processados
+    if (document.getElementById('card-'+entry.uid)) return;
+
     const card = document.createElement('div');
+    card.id = 'card-'+entry.uid;
     card.className = 'ficha';
+
     if (entry.status === 'error') {
-      card.innerHTML = `<div class="ficha-head"><div><div class="ficha-tipo">Erro na leitura</div><div class="ficha-nome">${entry.file.name}</div></div></div>
+      card.innerHTML = `<div class="ficha-head"><div><div class="ficha-tipo">Erro na leitura</div><div class="ficha-nome">${escapeHtml(entry.file.name)}</div></div></div>
         <div class="alertas"><div class="label">Falha</div><div style="font-size:12.5px;margin-top:5px;">${esc(entry.error)}</div></div>`;
       resultsEl.appendChild(card);
       return;
     }
+
     const d = entry.data;
+    const uid = entry.uid;
     const hist = d.historico_atos_relevantes || [];
     const onusAtivos = d.onus_ativos || [];
     const onusCancelados = d.onus_cancelados || [];
     const valores = d.valores_mencionados || [];
     const alertas = d.alertas || [];
+    const caixaVal = d.imovel_pertence_caixa;
 
     card.innerHTML = `
       <div class="ficha-head">
         <div>
           <div class="ficha-tipo">Matrícula ${esc(d.numero_matricula)} · ${esc(d.tipo_imovel)}</div>
-          <div class="ficha-nome">${entry.file.name}</div>
-          ${d.imovel_pertence_caixa ? '<span class="badge-caixa">Propriedade atual: CAIXA</span>' : ''}
+          <div class="ficha-nome">${escapeHtml(entry.file.name)}</div>
+          ${caixaVal === true ? '<span class="badge-caixa">Propriedade atual: CAIXA</span>' : ''}
         </div>
         <div class="stamp">LIDO<br>OK</div>
       </div>
       <div class="campos">
-        <div class="campo"><div class="label">CNM</div><div class="valor">${esc(d.cnm)}</div></div>
+        <div class="campo"><div class="label">Nº Matrícula</div><input class="edit-input" id="${fieldId(uid,'numero_matricula')}" type="text" value="${escAttr(d.numero_matricula)}"></div>
         <div class="campo"><div class="label">Cartório / Comarca</div><div class="valor">${esc(d.cartorio_nome)}${d.comarca_uf ? ' — ' + esc(d.comarca_uf) : ''}</div></div>
-        <div class="campo full"><div class="label">Endereço / Descrição</div><div class="valor">${esc(d.endereco_completo)}</div></div>
-        <div class="campo full"><div class="label">Proprietário atual</div><div class="valor">${esc(d.proprietario_atual_nome)}${d.proprietario_atual_documento ? ' — ' + esc(d.proprietario_atual_documento) : ''}</div></div>
-        <div class="campo"><div class="label">Área privativa</div><div class="valor">${esc(d.area_privativa_m2)}</div></div>
-        <div class="campo"><div class="label">Área total</div><div class="valor">${esc(d.area_total_m2)}</div></div>
+        <div class="campo full"><div class="label">Endereço / Descrição</div><textarea class="edit-input" id="${fieldId(uid,'endereco_completo')}" rows="2">${escapeHtml(d.endereco_completo || '')}</textarea></div>
+        <div class="campo full">
+          <div class="label">Proprietário atual (nome / documento)</div>
+          <input class="edit-input" id="${fieldId(uid,'proprietario_atual_nome')}" type="text" value="${escAttr(d.proprietario_atual_nome)}" placeholder="Nome do proprietário">
+          <input class="edit-input" id="${fieldId(uid,'proprietario_atual_documento')}" type="text" value="${escAttr(d.proprietario_atual_documento)}" placeholder="CPF/CNPJ" style="margin-top:6px;">
+        </div>
+        <div class="campo"><div class="label">Área privativa (m²)</div><input class="edit-input" id="${fieldId(uid,'area_privativa_m2')}" type="text" value="${escAttr(d.area_privativa_m2)}"></div>
+        <div class="campo"><div class="label">Área total (m²)</div><input class="edit-input" id="${fieldId(uid,'area_total_m2')}" type="text" value="${escAttr(d.area_total_m2)}"></div>
         <div class="campo"><div class="label">Matrícula de origem</div><div class="valor">${esc(d.matricula_origem)}</div></div>
         <div class="campo"><div class="label">Programa habitacional</div><div class="valor">${esc(d.programa_habitacional)}</div></div>
+        <div class="campo full">
+          <div class="label">Imóvel pertence à Caixa?</div>
+          <select class="edit-input" id="${fieldId(uid,'imovel_pertence_caixa')}" style="max-width:220px;">
+            <option value="true" ${caixaVal === true ? 'selected' : ''}>Sim</option>
+            <option value="false" ${caixaVal === false ? 'selected' : ''}>Não</option>
+            <option value="null" ${caixaVal === null || caixaVal === undefined ? 'selected' : ''}>Não determinado</option>
+          </select>
+        </div>
       </div>
       ${hist.length ? `<div class="historico"><div class="label">Histórico relevante</div><ul>${hist.map(h=>`<li><strong>${esc(h.codigo)}</strong> (${esc(h.data)}) — ${esc(h.tipo)}: ${esc(h.resumo)}</li>`).join('')}</ul></div>` : ''}
       ${valores.length ? `<div class="valores"><div class="label">Valores mencionados</div><ul style="margin:0;padding-left:16px;">${valores.map(v=>`<li>${esc(v.tipo)}: ${esc(v.valor)}</li>`).join('')}</ul></div>` : ''}
       ${onusAtivos.length ? `<div class="alertas"><div class="label">Ônus / gravames ativos</div><ul>${onusAtivos.map(o=>`<li>${esc(o)}</li>`).join('')}</ul></div>` : ''}
       ${onusCancelados.length ? `<div class="historico"><div class="label">Ônus já cancelados</div><ul>${onusCancelados.map(o=>`<li>${esc(o)}</li>`).join('')}</ul></div>` : ''}
       ${alertas.length ? `<div class="alertas"><div class="label">Alertas para a precificação</div><ul>${alertas.map(a=>`<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
-      <div class="confianca">Confiança da extração: ${esc(d.confianca_extracao)}</div>
+      <div class="correcao">
+        <div class="label">Observação de correção (opcional)</div>
+        <textarea class="edit-input" id="${fieldId(uid,'observacao')}" rows="2" placeholder="Ex: ônus ativo não identificado, valor de leilão incorreto..."></textarea>
+        <div class="edit-hint">Os campos acima já vêm preenchidos com a leitura da IA — edite direto onde estiver errado. Isso vira o dado de referência ao exportar.</div>
+      </div>
+      <div class="confianca">Confiança da extração (IA): ${esc(d.confianca_extracao)}</div>
     `;
     resultsEl.appendChild(card);
   });
@@ -258,19 +329,69 @@ processBtn.addEventListener('click', async () => {
 
 exportBtn.addEventListener('click', () => {
   const done = files.filter(f => f.status === 'done');
-  const headers = ['arquivo','numero_matricula','tipo_imovel','endereco_completo','proprietario_atual_nome','proprietario_atual_documento','imovel_pertence_caixa','area_privativa_m2','area_total_m2','onus_ativos','valores_mencionados','alertas','confianca_extracao'];
+  const headers = [
+    'arquivo',
+    'numero_matricula_original','numero_matricula_corrigido',
+    'endereco_completo_original','endereco_completo_corrigido',
+    'proprietario_nome_original','proprietario_nome_corrigido',
+    'proprietario_documento_original','proprietario_documento_corrigido',
+    'area_privativa_m2_original','area_privativa_m2_corrigido',
+    'area_total_m2_original','area_total_m2_corrigido',
+    'imovel_pertence_caixa_original','imovel_pertence_caixa_corrigido',
+    'onus_ativos','valores_mencionados','alertas',
+    'confianca_extracao_ia','teve_correcao','observacao_correcao'
+  ];
+
+  const getVal = (uid, field) => {
+    const el = document.getElementById(fieldId(uid, field));
+    return el ? el.value : '';
+  };
+
   const rows = done.map(f => {
     const d = f.data;
+    const uid = f.uid;
+
+    const corrNome = getVal(uid, 'proprietario_atual_nome');
+    const corrDoc = getVal(uid, 'proprietario_atual_documento');
+    const corrMatricula = getVal(uid, 'numero_matricula');
+    const corrEndereco = getVal(uid, 'endereco_completo');
+    const corrAreaPriv = getVal(uid, 'area_privativa_m2');
+    const corrAreaTotal = getVal(uid, 'area_total_m2');
+    const corrCaixa = getVal(uid, 'imovel_pertence_caixa');
+    const observacao = getVal(uid, 'observacao');
+
+    const origCaixaStr = (d.imovel_pertence_caixa === null || d.imovel_pertence_caixa === undefined) ? 'null' : String(d.imovel_pertence_caixa);
+
+    const pares = [
+      [d.numero_matricula, corrMatricula],
+      [d.endereco_completo, corrEndereco],
+      [d.proprietario_atual_nome, corrNome],
+      [d.proprietario_atual_documento, corrDoc],
+      [d.area_privativa_m2, corrAreaPriv],
+      [d.area_total_m2, corrAreaTotal],
+      [origCaixaStr, corrCaixa]
+    ];
+    const teveCorrecao = pares.some(([orig, corr]) => String(orig ?? '') !== String(corr ?? '')) || observacao.trim() !== '';
+
     const vals = [
-      f.file.name, d.numero_matricula, d.tipo_imovel, d.endereco_completo,
-      d.proprietario_atual_nome, d.proprietario_atual_documento, d.imovel_pertence_caixa,
-      d.area_privativa_m2, d.area_total_m2,
+      f.file.name,
+      d.numero_matricula, corrMatricula,
+      d.endereco_completo, corrEndereco,
+      d.proprietario_atual_nome, corrNome,
+      d.proprietario_atual_documento, corrDoc,
+      d.area_privativa_m2, corrAreaPriv,
+      d.area_total_m2, corrAreaTotal,
+      origCaixaStr, corrCaixa,
       (d.onus_ativos||[]).join('; '),
       (d.valores_mencionados||[]).map(v=>`${v.tipo}: ${v.valor}`).join('; '),
-      (d.alertas||[]).join('; '), d.confianca_extracao
+      (d.alertas||[]).join('; '),
+      d.confianca_extracao,
+      teveCorrecao ? 'sim' : 'nao',
+      observacao
     ];
     return vals.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',');
   });
+
   const csv = [headers.join(','), ...rows].join('\n');
   const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
