@@ -27,7 +27,7 @@ Acesse seu projeto em vercel.com → **Settings → Environment Variables** e co
 | `GEMINI_API_KEY` | sua chave gerada em https://aistudio.google.com/apikey | sim |
 | `APP_ACCESS_KEY` | uma senha simples que só a equipe do teste vai saber | recomendada — sem ela, o endpoint fica aberto pra qualquer um com o link |
 
-Remova `ANTHROPIC_API_KEY` se ainda estiver lá de uma tentativa anterior, pra não confundir.
+Remova `GEMINI_API_KEY` se ainda estiver lá de uma tentativa anterior, pra não confundir.
 
 ### 2. No repositório
 Substitua `index.html`, `api/extract.js` e adicione `vercel.json` na raiz. Depois:

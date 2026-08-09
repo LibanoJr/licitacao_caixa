@@ -1,3 +1,22 @@
+// api/extract.js
+// Extração de dados de Certidão de Inteiro Teor via Gemini — CR 12/2026 CAIXA (GEHPA)
+//
+// SYSTEM_PROMPT e RESPONSE_SCHEMA são a parte de domínio — mantidos como
+// estavam. Mudanças desta revisão são de infraestrutura: segurança,
+// robustez, LGPD, e agora controle de custo (opt-in).
+
+import { neon } from "@neondatabase/serverless";
+
+const sql = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null;
+
+// Limite diário de chamadas ao Gemini — OPCIONAL. Se a variável de
+// ambiente LIMITE_DIARIO_GEMINI não for configurada na Vercel, este
+// bloco fica completamente inativo e o comportamento é IDÊNTICO ao de
+// antes (sem limite, sem checagem, sem mudança de fluxo).
+const LIMITE_DIARIO_GEMINI = process.env.LIMITE_DIARIO_GEMINI
+  ? Number(process.env.LIMITE_DIARIO_GEMINI)
+  : null;
+
 const SYSTEM_PROMPT = `Você é um especialista em análise de matrículas de imóveis e certidões de inteiro teor de cartórios de registro de imóveis no Brasil, atuando para a Caixa Econômica Federal em precificação de imóveis para leilão (GEHPA).
 
 Os documentos são "Certidões de Inteiro Teor", contendo o histórico completo da matrícula: o registro do imóvel seguido de uma sequência de Averbações (AV-) e Registros (R-) em ordem cronológica, cada um com um código, protocolo, data e teor (incorporação, construção, instituição de condomínio, convenção, compra e venda, alienação fiduciária, cancelamento, consolidação de domínio, etc.).
@@ -68,31 +87,71 @@ const RESPONSE_SCHEMA = {
   required: ["numero_matricula", "tipo_imovel", "imovel_pertence_caixa", "confianca_extracao"]
 };
 
-// Tenta a chamada ao Gemini com retry/backoff quando o tier gratuito
-// devolve 429 (limite de requisições por minuto atingido).
-async function callGeminiWithRetry(url, body, maxRetries = 2) {
+async function callGeminiWithRetry(url, body, headers, maxRetries = 2) {
   let lastResponse;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (response.status !== 429) return response;
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (response.status !== 429 && response.status !== 500 && response.status !== 503) {
+      return response;
+    }
     lastResponse = response;
     if (attempt < maxRetries) {
-      const waitMs = 1500 * Math.pow(2, attempt); // 1.5s, 3s
+      const waitMs = 1500 * Math.pow(2, attempt);
       await new Promise(r => setTimeout(r, waitMs));
     }
   }
   return lastResponse;
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).send('Método não permitido');
+function pareceSerPdfValido(fileBase64) {
+  try {
+    const amostra = Buffer.from(fileBase64.slice(0, 40), 'base64').toString('utf-8');
+    return amostra.startsWith('%PDF');
+  } catch {
+    return false;
+  }
+}
 
-  // Chave de acesso simples — só ativa se APP_ACCESS_KEY estiver configurada
-  // na Vercel. Sem ela configurada, o endpoint continua aberto (como estava).
+// Só age se LIMITE_DIARIO_GEMINI estiver configurado. Se o banco falhar
+// ao verificar, DEIXA PASSAR (fail-open) — uma falha no monitoramento
+// nunca deve travar o produto principal.
+async function verificarLimiteDiario() {
+  if (!sql || !LIMITE_DIARIO_GEMINI) return { bloqueado: false, totalHoje: 0 };
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const resultado = await sql`SELECT total_chamadas FROM uso_gemini WHERE data = ${hoje}`;
+    const totalHoje = resultado[0]?.total_chamadas || 0;
+    return { bloqueado: totalHoje >= LIMITE_DIARIO_GEMINI, totalHoje };
+  } catch (err) {
+    console.error('Falha ao checar limite diário (permitindo chamada):', err.message);
+    return { bloqueado: false, totalHoje: 0 };
+  }
+}
+
+// Registra a chamada pro contador. Silenciosamente ignora erro — nunca
+// derruba a resposta principal por causa disso.
+async function registrarChamadaGemini(sucesso) {
+  if (!sql) return;
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    await sql`
+      INSERT INTO uso_gemini (data, total_chamadas, total_sucesso, total_erro)
+      VALUES (${hoje}, 1, ${sucesso ? 1 : 0}, ${sucesso ? 0 : 1})
+      ON CONFLICT (data) DO UPDATE SET
+        total_chamadas = uso_gemini.total_chamadas + 1,
+        total_sucesso = uso_gemini.total_sucesso + ${sucesso ? 1 : 0},
+        total_erro = uso_gemini.total_erro + ${sucesso ? 0 : 1}
+    `;
+  } catch (err) {
+    console.error('Falha ao registrar uso (não afeta a resposta):', err.message);
+  }
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Método não permitido' });
+  }
+
   const expectedKey = process.env.APP_ACCESS_KEY;
   if (expectedKey) {
     const providedKey = req.headers['x-app-key'];
@@ -106,12 +165,26 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Nenhum arquivo enviado' });
   }
 
+  if (!pareceSerPdfValido(fileBase64)) {
+    return res.status(400).json({ error: 'O arquivo enviado não parece ser um PDF válido.' });
+  }
+
+  // Só bloqueia se LIMITE_DIARIO_GEMINI estiver configurado — sem essa
+  // env var, este trecho não muda nada do comportamento atual.
+  const { bloqueado, totalHoje } = await verificarLimiteDiario();
+  if (bloqueado) {
+    return res.status(429).json({
+      error: `Limite diário de ${LIMITE_DIARIO_GEMINI} chamadas ao Gemini atingido (${totalHoje} hoje). Ajuste LIMITE_DIARIO_GEMINI na Vercel ou aguarde o próximo dia.`
+    });
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no servidor' });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`;
+  const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey };
 
   try {
     const response = await callGeminiWithRetry(url, {
@@ -123,12 +196,21 @@ export default async function handler(req, res) {
       }],
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: RESPONSE_SCHEMA
+        responseSchema: RESPONSE_SCHEMA,
+        temperature: 0,
+        maxOutputTokens: 8192
       }
-    });
+    }, headers);
+
+    // Registra a tentativa (sucesso = resposta HTTP OK do Gemini),
+    // independente do que acontecer no parsing abaixo.
+    await registrarChamadaGemini(response.ok);
 
     if (response.status === 429) {
       return res.status(429).json({ error: 'Limite de requisições do Gemini (tier gratuito) atingido. Aguarde cerca de 1 minuto e tente novamente.' });
+    }
+    if (response.status === 500 || response.status === 503) {
+      return res.status(502).json({ error: 'API do Gemini instável no momento. Tente novamente em alguns segundos.' });
     }
 
     const data = await response.json();
@@ -152,11 +234,13 @@ export default async function handler(req, res) {
     try {
       parsed = JSON.parse(jsonStr);
     } catch (e) {
-      return res.status(502).json({ error: "Resposta da IA não veio em JSON válido", raw: jsonStr.slice(0, 500) });
+      console.error("Resposta da IA não veio em JSON válido:", jsonStr.slice(0, 500));
+      return res.status(502).json({ error: "Resposta da IA não veio em JSON válido. Verifique os logs do servidor para detalhes." });
     }
 
-    res.status(200).json(parsed);
+    return res.status(200).json(parsed);
   } catch (error) {
-    res.status(500).json({ error: "Falha ao processar dados: " + error.message });
+    console.error("Falha ao processar extração:", error);
+    return res.status(500).json({ error: "Falha ao processar dados: " + error.message });
   }
 }

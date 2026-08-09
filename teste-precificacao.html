@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Teste — Precificação AVM | CR 12/2026 CAIXA</title>
+<title>Teste — Pipeline Completo (Extração + Precificação) | CR 12/2026</title>
 <style>
   :root {
     --bg: #f7f8fa;
@@ -18,6 +18,9 @@
     --warn-line: #f0c979;
     --ok-bg: #e9f5ef;
     --ok-ink: #1f6e4a;
+    --bad-bg: #fbeaea;
+    --bad-ink: #a12626;
+    --bad-line: #e8a5a5;
     --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
   }
   * { box-sizing: border-box; }
@@ -26,292 +29,277 @@
     background: var(--bg);
     color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    padding: 32px 16px;
+    padding: 28px 16px 60px;
   }
   .wrap { max-width: 640px; margin: 0 auto; }
   .eyebrow {
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-    font-weight: 600;
-    margin-bottom: 6px;
+    font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 600; margin-bottom: 6px;
   }
-  h1 {
-    font-size: 22px;
-    margin: 0 0 4px;
-    letter-spacing: -0.01em;
-  }
-  .subtitle {
-    color: var(--ink-soft);
-    font-size: 14px;
-    margin-bottom: 28px;
-    line-height: 1.5;
-  }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 24px; line-height: 1.5; }
   .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 24px;
-    margin-bottom: 20px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 22px; margin-bottom: 16px;
   }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .field { margin-bottom: 14px; }
-  .field.full { grid-column: 1 / -1; }
-  label {
-    display: block;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--ink-soft);
-    margin-bottom: 5px;
+  label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin-bottom: 5px; }
+  input[type="file"] {
+    width: 100%; padding: 10px; border: 1px dashed var(--line);
+    border-radius: 6px; font-size: 13px; background: #fafbfc;
   }
-  input, select {
-    width: 100%;
-    padding: 9px 10px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    font-size: 14px;
-    font-family: inherit;
-    color: var(--ink);
-    background: #fff;
-  }
-  input:focus, select:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
+  input[type="password"], input[type="text"] {
+    width: 100%; padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 6px; font-size: 14px; font-family: inherit;
   }
   button {
-    width: 100%;
-    padding: 12px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 7px;
-    font-size: 14.5px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-top: 6px;
+    width: 100%; padding: 12px; background: var(--accent); color: #fff;
+    border: none; border-radius: 7px; font-size: 14.5px; font-weight: 600;
+    cursor: pointer; margin-top: 4px;
   }
   button:hover { background: #16304e; }
   button:disabled { background: #9aa5b1; cursor: wait; }
 
-  #resultado { display: none; }
-  .valor-principal {
-    font-family: var(--mono);
-    font-size: 34px;
-    font-weight: 700;
-    color: var(--accent);
-    letter-spacing: -0.01em;
+  .step {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--ink-soft); padding: 6px 0;
   }
-  .valor-label {
-    font-size: 12px;
-    color: var(--ink-soft);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 600;
+  .step .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex-shrink: 0;
   }
+  .step.ativo .dot { background: var(--accent); }
+  .step.ok .dot { background: var(--ok-ink); }
+  .step.erro .dot { background: var(--bad-ink); }
+  .step.ok, .step.erro { color: var(--ink); font-weight: 500; }
+
+  #painel-progresso, #painel-resultado { display: none; }
+
   .badge {
-    display: inline-block;
-    font-size: 11.5px;
-    font-weight: 700;
-    padding: 3px 9px;
-    border-radius: 20px;
-    margin-top: 10px;
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 3px 9px; border-radius: 20px; margin-right: 6px; margin-bottom: 4px;
   }
   .badge.ok { background: var(--ok-bg); color: var(--ok-ink); }
   .badge.warn { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line); }
+  .badge.bad { background: var(--bad-bg); color: var(--bad-ink); border: 1px solid var(--bad-line); }
+  .badge.neutral { background: var(--accent-soft); color: var(--accent); }
 
-  .detalhes {
-    margin-top: 18px;
-    border-top: 1px solid var(--line);
-    padding-top: 14px;
+  .valor-label { font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .valor-principal { font-family: var(--mono); font-size: 32px; font-weight: 700; color: var(--accent); letter-spacing: -0.01em; margin: 4px 0 8px; }
+
+  .secao-titulo {
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--ink-soft);
+    margin: 18px 0 8px; padding-top: 14px; border-top: 1px solid var(--line);
   }
-  .linha {
-    display: flex;
-    justify-content: space-between;
-    font-size: 13px;
-    padding: 5px 0;
-    color: var(--ink-soft);
-  }
-  .linha strong { color: var(--ink); font-family: var(--mono); font-weight: 600; }
-  .aviso-box {
-    background: var(--warn-bg);
-    border: 1px solid var(--warn-line);
-    color: var(--warn-ink);
-    font-size: 12.5px;
-    padding: 10px 12px;
-    border-radius: 7px;
-    margin-top: 14px;
-    line-height: 1.5;
+  .linha { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 5px 0; color: var(--ink-soft); }
+  .linha strong { color: var(--ink); font-family: var(--mono); font-weight: 600; text-align: right; }
+  .lista-alertas { font-size: 12.5px; color: var(--warn-ink); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 7px; padding: 10px 12px; margin-top: 8px; }
+  .lista-alertas li { margin-bottom: 3px; }
+
+  details { margin-top: 14px; }
+  summary { font-size: 12px; color: var(--ink-soft); cursor: pointer; font-weight: 600; }
+  pre {
+    background: #0f1720; color: #d6e0ea; font-size: 11px; padding: 12px;
+    border-radius: 7px; overflow-x: auto; margin-top: 8px; line-height: 1.5;
   }
   .erro-box {
-    background: #fbeaea;
-    border: 1px solid #e8a5a5;
-    color: #a12626;
-    font-size: 13px;
-    padding: 12px;
-    border-radius: 7px;
-    margin-top: 14px;
-    display: none;
+    background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--bad-ink);
+    font-size: 13px; padding: 12px; border-radius: 7px; margin-top: 14px; display: none;
   }
-  footer {
-    text-align: center;
-    font-size: 11.5px;
-    color: var(--ink-soft);
-    margin-top: 24px;
-  }
+  footer { text-align: center; font-size: 11.5px; color: var(--ink-soft); margin-top: 24px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="eyebrow">MVP interno · não é interface final</div>
-  <h1>Teste de Precificação (AVM)</h1>
+  <div class="eyebrow">MVP interno · pipeline completo</div>
+  <h1>Teste — Extração + Precificação</h1>
   <p class="subtitle">
-    Página isolada para validar o endpoint <code>/api/price</code> diretamente,
-    sem depender da extração por PDF ainda. Preencha os campos abaixo e confira
-    o valor estimado e a origem de cada dado usado no cálculo.
+    Envia a Certidão de Inteiro Teor em PDF, chama <code>/api/extract</code> (Gemini)
+    e em seguida <code>/api/price</code> automaticamente com o resultado. Testa o
+    fluxo real de ponta a ponta, sem terminal.
   </p>
 
   <div class="panel">
-    <form id="form-precificacao">
-      <div class="grid">
-        <div class="field full">
-          <label for="area">Área privativa (m²)</label>
-          <input type="number" id="area" placeholder="Ex: 80" min="1" step="0.01" required>
-        </div>
-        <div class="field full">
-          <label for="regiao">Região Administrativa (DF)</label>
-          <select id="regiao" required>
-            <option value="">Selecione...</option>
-            <option value="lago sul">Lago Sul</option>
-            <option value="setor sudoeste">Setor Sudoeste</option>
-            <option value="asa sul">Asa Sul</option>
-            <option value="asa norte">Asa Norte</option>
-            <option value="aguas claras">Águas Claras</option>
-            <option value="lago norte">Lago Norte</option>
-            <option value="guara">Guará</option>
-            <option value="vicente pires">Vicente Pires</option>
-            <option value="taguatinga">Taguatinga</option>
-            <option value="sobradinho">Sobradinho</option>
-            <option value="gama">Gama</option>
-            <option value="samambaia">Samambaia</option>
-            <option value="ceilandia">Ceilândia</option>
-            <option value="recanto das emas">Recanto das Emas</option>
-            <option value="planaltina">Planaltina</option>
-            <option value="outra">Outra (testar fallback)</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="vagas">Vagas de garagem</label>
-          <input type="number" id="vagas" placeholder="0" min="0" value="0">
-        </div>
-        <div class="field">
-          <label for="quartos">Quartos</label>
-          <input type="number" id="quartos" placeholder="0" min="0" value="0">
-        </div>
-        <div class="field full">
-          <label for="idade">Idade do imóvel (anos, opcional)</label>
-          <input type="number" id="idade" placeholder="Ex: 15" min="0">
-        </div>
-      </div>
-      <button type="submit" id="btn-calcular">Calcular valor estimado</button>
-    </form>
+    <div class="field">
+      <label for="arquivo">Certidão de Inteiro Teor (PDF)</label>
+      <input type="file" id="arquivo" accept="application/pdf">
+    </div>
+    <div class="field">
+      <label for="chave">Chave de acesso (só se APP_ACCESS_KEY estiver configurada)</label>
+      <input type="password" id="chave" placeholder="Deixe em branco se não souber">
+    </div>
+    <button id="btn-processar">Processar documento</button>
     <div class="erro-box" id="erro-box"></div>
   </div>
 
-  <div class="panel" id="resultado">
-    <div class="valor-label">Valor estimado</div>
-    <div class="valor-principal" id="valor-principal">—</div>
-    <span class="badge" id="badge-status"></span>
-
-    <div class="detalhes">
-      <div class="linha"><span>Área privativa</span><strong id="d-area">—</strong></div>
-      <div class="linha"><span>Região identificada</span><strong id="d-regiao">—</strong></div>
-      <div class="linha"><span>Preço/m² utilizado</span><strong id="d-precom2">—</strong></div>
-      <div class="linha"><span>Fonte do preço/m²</span><strong id="d-fonte">—</strong></div>
-      <div class="linha"><span>Valor base (antes dos ajustes)</span><strong id="d-base">—</strong></div>
-      <div class="linha"><span>Fator de ajuste aplicado</span><strong id="d-ajuste">—</strong></div>
-    </div>
-
-    <div class="aviso-box" id="aviso-box" style="display:none;"></div>
+  <div class="panel" id="painel-progresso">
+    <div class="step" id="step-extract"><div class="dot"></div><span>Extraindo dados do PDF (Gemini)...</span></div>
+    <div class="step" id="step-price"><div class="dot"></div><span>Calculando valor estimado...</span></div>
   </div>
 
-  <footer>
-    Endpoint testado: <code>/api/price</code> · Tabela de preço/m² é MVP inicial (placeholders sujeitos a validação)
-  </footer>
+  <div class="panel" id="painel-resultado">
+    <div class="valor-label">Valor estimado</div>
+    <div class="valor-principal" id="valor-principal">—</div>
+    <div id="badges-topo"></div>
+
+    <div class="secao-titulo">Cálculo</div>
+    <div class="linha"><span>Área utilizada</span><strong id="d-area">—</strong></div>
+    <div class="linha"><span>Endereço extraído</span><strong id="d-endereco">—</strong></div>
+    <div class="linha"><span>Região identificada</span><strong id="d-regiao">—</strong></div>
+    <div class="linha"><span>Preço/m² utilizado</span><strong id="d-precom2">—</strong></div>
+    <div class="linha"><span>Fonte do preço/m²</span><strong id="d-fonte">—</strong></div>
+    <div class="linha"><span>Fator de ajuste</span><strong id="d-ajuste">—</strong></div>
+
+    <div class="secao-titulo">Contexto da extração</div>
+    <div class="linha"><span>Confiança da extração</span><strong id="d-confianca">—</strong></div>
+    <div class="linha"><span>Pertence à CAIXA</span><strong id="d-pertence">—</strong></div>
+    <div class="linha"><span>Ônus ativos</span><strong id="d-onus">—</strong></div>
+
+    <ul class="lista-alertas" id="lista-alertas" style="display:none;"></ul>
+
+    <details>
+      <summary>Ver JSON completo (extração + cálculo)</summary>
+      <pre id="json-bruto"></pre>
+    </details>
+  </div>
+
+  <footer>Chama <code>/api/extract</code> e <code>/api/price</code> na sequência, no seu próprio deploy Vercel.</footer>
 </div>
 
 <script>
-const form = document.getElementById('form-precificacao');
-const btn = document.getElementById('btn-calcular');
-const resultado = document.getElementById('resultado');
+const btn = document.getElementById('btn-processar');
+const arquivoInput = document.getElementById('arquivo');
+const chaveInput = document.getElementById('chave');
 const erroBox = document.getElementById('erro-box');
+const painelProgresso = document.getElementById('painel-progresso');
+const painelResultado = document.getElementById('painel-resultado');
+const stepExtract = document.getElementById('step-extract');
+const stepPrice = document.getElementById('step-price');
 
-const fmtBRL = (valor) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
+const fmtBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
+function marcarStep(el, estado) {
+  el.classList.remove('ativo', 'ok', 'erro');
+  el.classList.add(estado);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function badgeConfianca(nivel) {
+  if (nivel === 'alta') return '<span class="badge ok">CONFIANÇA ALTA</span>';
+  if (nivel === 'media') return '<span class="badge warn">CONFIANÇA MÉDIA</span>';
+  if (nivel === 'baixa') return '<span class="badge bad">CONFIANÇA BAIXA</span>';
+  return '<span class="badge neutral">CONFIANÇA NÃO INFORMADA</span>';
+}
+
+btn.addEventListener('click', async () => {
   erroBox.style.display = 'none';
-  resultado.style.display = 'none';
-  btn.disabled = true;
-  btn.textContent = 'Calculando...';
+  painelResultado.style.display = 'none';
 
-  const payload = {
-    area_privativa: Number(document.getElementById('area').value),
-    regiao_administrativa: document.getElementById('regiao').value,
-    vagas_garagem: Number(document.getElementById('vagas').value) || 0,
-    quartos: Number(document.getElementById('quartos').value) || 0,
-    idade_imovel: document.getElementById('idade').value
-      ? Number(document.getElementById('idade').value)
-      : undefined,
-  };
+  const arquivo = arquivoInput.files[0];
+  if (!arquivo) {
+    erroBox.style.display = 'block';
+    erroBox.textContent = 'Selecione um arquivo PDF primeiro.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Processando...';
+  painelProgresso.style.display = 'block';
+  marcarStep(stepExtract, 'ativo');
+  marcarStep(stepPrice, '');
 
   try {
-    const resp = await fetch('/api/price', {
+    const fileBase64 = await fileToBase64(arquivo);
+
+    const headersExtract = { 'Content-Type': 'application/json' };
+    if (chaveInput.value.trim()) headersExtract['x-app-key'] = chaveInput.value.trim();
+
+    const respExtract = await fetch('/api/extract', {
+      method: 'POST',
+      headers: headersExtract,
+      body: JSON.stringify({ fileBase64 }),
+    });
+    const dadosExtraidos = await respExtract.json();
+
+    if (!respExtract.ok) {
+      marcarStep(stepExtract, 'erro');
+      throw new Error(dadosExtraidos.error || 'Erro na extração (verifique a chave de acesso ou tente novamente).');
+    }
+    marcarStep(stepExtract, 'ok');
+    marcarStep(stepPrice, 'ativo');
+
+    const respPrice = await fetch('/api/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(dadosExtraidos),
     });
+    const dadosPrecificacao = await respPrice.json();
 
-    const dados = await resp.json();
-
-    if (!resp.ok) {
-      throw new Error(dados.erro || 'Erro desconhecido ao calcular.');
+    if (!respPrice.ok) {
+      marcarStep(stepPrice, 'erro');
+      throw new Error(dadosPrecificacao.erro || 'Erro ao calcular precificação.');
     }
+    marcarStep(stepPrice, 'ok');
 
-    document.getElementById('valor-principal').textContent = fmtBRL(dados.valor_estimado);
-    document.getElementById('d-area').textContent = `${dados.detalhes_calculo.area_privativa} m²`;
-    document.getElementById('d-regiao').textContent = dados.detalhes_calculo.regiao_identificada || '—';
-    document.getElementById('d-precom2').textContent = fmtBRL(dados.detalhes_calculo.preco_m2_utilizado) + '/m²';
-    document.getElementById('d-fonte').textContent = dados.detalhes_calculo.fonte_preco_m2;
-    document.getElementById('d-base').textContent = fmtBRL(dados.detalhes_calculo.valor_base);
-    document.getElementById('d-ajuste').textContent = `×${dados.detalhes_calculo.fator_ajuste.toFixed(3)}`;
+    // Renderiza resultado
+    document.getElementById('valor-principal').textContent = fmtBRL(dadosPrecificacao.valor_estimado);
 
-    const badge = document.getElementById('badge-status');
-    if (dados.precisa_revisao_manual) {
-      badge.textContent = 'PRECISA REVISÃO MANUAL';
-      badge.className = 'badge warn';
+    const badgesTopo = document.getElementById('badges-topo');
+    let badgesHtml = badgeConfianca(dadosExtraidos.confianca_extracao);
+    if (dadosPrecificacao.precisa_revisao_manual) {
+      badgesHtml += '<span class="badge warn">PRECISA REVISÃO MANUAL</span>';
     } else {
-      badge.textContent = 'OK — DADO VALIDADO';
-      badge.className = 'badge ok';
+      badgesHtml += '<span class="badge ok">OK — SEM PENDÊNCIA</span>';
     }
+    if (dadosExtraidos.imovel_pertence_caixa === true) {
+      badgesHtml += '<span class="badge neutral">IMÓVEL DA CAIXA</span>';
+    }
+    badgesTopo.innerHTML = badgesHtml;
 
-    const avisoBox = document.getElementById('aviso-box');
-    if (dados.aviso) {
-      avisoBox.style.display = 'block';
-      avisoBox.textContent = '⚠ ' + dados.aviso;
+    const dc = dadosPrecificacao.detalhes_calculo;
+    document.getElementById('d-area').textContent = `${dc.area_utilizada_m2} m² (${dc.origem_area})`;
+    document.getElementById('d-endereco').textContent = dc.endereco_original || '—';
+    document.getElementById('d-regiao').textContent = dc.regiao_identificada;
+    document.getElementById('d-precom2').textContent = fmtBRL(dc.preco_m2_utilizado) + '/m²';
+    document.getElementById('d-fonte').textContent = dc.fonte_preco_m2;
+    document.getElementById('d-ajuste').textContent = `×${dc.fator_ajuste.toFixed(3)}`;
+
+    document.getElementById('d-confianca').textContent = dadosExtraidos.confianca_extracao || '—';
+    document.getElementById('d-pertence').textContent =
+      dadosExtraidos.imovel_pertence_caixa === true ? 'Sim' :
+      dadosExtraidos.imovel_pertence_caixa === false ? 'Não' : 'Não determinado';
+    document.getElementById('d-onus').textContent =
+      (dadosExtraidos.onus_ativos && dadosExtraidos.onus_ativos.length)
+        ? dadosExtraidos.onus_ativos.join('; ')
+        : 'Nenhum identificado';
+
+    const listaAlertas = document.getElementById('lista-alertas');
+    if (dadosExtraidos.alertas && dadosExtraidos.alertas.length) {
+      listaAlertas.style.display = 'block';
+      listaAlertas.innerHTML = dadosExtraidos.alertas.map(a => `<li>⚠ ${a}</li>`).join('');
     } else {
-      avisoBox.style.display = 'none';
+      listaAlertas.style.display = 'none';
     }
 
-    resultado.style.display = 'block';
+    document.getElementById('json-bruto').textContent = JSON.stringify(
+      { extracao: dadosExtraidos, precificacao: dadosPrecificacao }, null, 2
+    );
+
+    painelResultado.style.display = 'block';
   } catch (err) {
     erroBox.style.display = 'block';
-    erroBox.textContent = 'Erro: ' + err.message + ' — confira se /api/price foi publicado corretamente.';
+    erroBox.textContent = 'Erro: ' + err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Calcular valor estimado';
+    btn.textContent = 'Processar documento';
   }
 });
 </script>
