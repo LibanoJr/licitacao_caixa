@@ -19,7 +19,18 @@
 
 import { neon } from "@neondatabase/serverless";
 
-const sql = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null;
+// A integração Vercel Marketplace × Neon pode nomear a variável de formas
+// diferentes dependendo do nome do recurso escolhido (ex: "STORAGE_" como
+// prefixo). Tenta todas as variações plausíveis, na ordem de preferência
+// (pooled primeiro, é o recomendado pra função serverless).
+const CONNECTION_STRING =
+  process.env.STORAGE_DATABASE_URL ||
+  process.env.DATABASE_URL ||
+  process.env.STORAGE_DATABASE_URL_UNPOOLED ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_URL_NON_POOLING;
+
+const sql = CONNECTION_STRING ? neon(CONNECTION_STRING) : null;
 
 // ============================================================
 // MOTOR DE PRECIFICAÇÃO — parte que será substituída pelo modelo treinado
@@ -47,47 +58,159 @@ const PRECO_M2_POR_CIDADE = {
       "planaltina": { valor: 3500, fonte: "placeholder" },
     },
   },
+  // Entorno do DF, estado de Goiás — dado bem mais esparso que o DF, sem
+  // agregado tipo FipeZAP disponível. Baseado em poucos anúncios
+  // individuais (apartamento de entrada ~R$2.300/m², condomínios
+  // fechados tipo Damha/Alphaville acima de R$4.000/m²).
+  // Confiança BAIXA — validar assim que houver dado de venda real.
+  "cidade-ocidental-go": {
+    valor_medio_fallback: 3200,
+    regioes: {
+      "damha": { valor: 4200, fonte: "placeholder_baixa_confianca" },
+      "alphaville": { valor: 4200, fonte: "placeholder_baixa_confianca" },
+    },
+  },
+  // Próximas cidades entram aqui como novas chaves.
 };
 
-const PADROES_REGIAO_DF = [
-  { padroes: ["sqsw", "sudoeste"], regiao: "setor sudoeste" },
-  { padroes: ["sqnw", "noroeste"], regiao: "noroeste" },
-  { padroes: ["shis", "lago sul"], regiao: "lago sul" },
-  { padroes: ["shin", "lago norte"], regiao: "lago norte" },
-  { padroes: ["sqs", "asa sul"], regiao: "asa sul" },
-  { padroes: ["sqn", "asa norte"], regiao: "asa norte" },
-  { padroes: ["aguas claras"], regiao: "aguas claras" },
-  { padroes: ["vicente pires"], regiao: "vicente pires" },
-  { padroes: ["taguatinga"], regiao: "taguatinga" },
-  { padroes: ["ceilandia"], regiao: "ceilandia" },
-  { padroes: ["samambaia"], regiao: "samambaia" },
-  { padroes: ["guara"], regiao: "guara" },
-  { padroes: ["recanto das emas"], regiao: "recanto das emas" },
-  { padroes: ["gama"], regiao: "gama" },
-  { padroes: ["sobradinho"], regiao: "sobradinho" },
-  { padroes: ["planaltina"], regiao: "planaltina" },
+// Padrões de identificação de CIDADE (a partir de comarca_uf). Cada
+// cidade nova (escolhida pelo time ou atribuída pela CAIXA) só precisa
+// de uma entrada aqui + uma entrada em PRECO_M2_POR_CIDADE.
+// Extrai a UF (estado) do texto do comarca_uf, quando disponível — usado
+// pra desambiguar nomes de cidade que existem em mais de um estado (ex:
+// "Planaltina" existe no DF e em Goiás, como cidades diferentes).
+function extrairUF(comarcaUf) {
+  const texto = normalizar(comarcaUf);
+  if (/\bdf\b/.test(texto) || texto.includes("distrito federal")) return "df";
+  if (/\bgo\b/.test(texto) || texto.includes("goias") || texto.includes("goiania")) return "go";
+  if (/\bsp\b/.test(texto) || texto.includes("sao paulo")) return "sp";
+  if (/\brj\b/.test(texto) || texto.includes("rio de janeiro")) return "rj";
+  if (/\bmg\b/.test(texto) || texto.includes("minas gerais")) return "mg";
+  return null;
+}
+
+// Cada entrada pode exigir uma UF específica (campo "uf") — usado só
+// onde existe colisão de nome real. Entradas sem "uf" casam só pelo nome.
+// ORDEM IMPORTA: entradas com "uf" que resolvem colisão devem vir ANTES
+// do padrão genérico que colide (ex: "planaltina" do DF).
+const PADROES_CIDADE = [
+  // Colisão conhecida: Planaltina existe como cidade separada em GO E
+  // como Região Administrativa do DF. Sem confirmar a UF, não adivinha.
+  { padroes: ["planaltina"], uf: "go", cidade: "planaltina-go" },
+
+  { padroes: ["cidade ocidental"], cidade: "cidade-ocidental-go" },
+  { padroes: ["luziania"], cidade: "luziania-go" },
+  { padroes: ["valparaiso"], cidade: "valparaiso-go" },
+  { padroes: ["novo gama"], cidade: "novo-gama-go" },
+  { padroes: ["aguas lindas"], cidade: "aguas-lindas-go" },
+  { padroes: ["formosa"], cidade: "formosa-go" },
+  { padroes: ["anapolis"], cidade: "anapolis-go" },
+  { padroes: ["caldas novas"], cidade: "caldas-novas-go" },
+  { padroes: ["rio verde"], cidade: "rio-verde-go" },
+  { padroes: ["goiatuba"], cidade: "goiatuba-go" },
+  { padroes: ["goiania"], cidade: "rm-goiania-go" },
+
+  // SP tem 3 regiões distintas na lista — nomes mais específicos primeiro,
+  // "sao paulo" genérico por último (senão captura os outros dois).
+  { padroes: ["campinas"], cidade: "rm-campinas-sp" },
+  { padroes: ["vale do paraiba", "sao jose dos campos", "taubate"], cidade: "rm-vale-paraiba-sp" },
+  { padroes: ["sao paulo"], cidade: "rm-sao-paulo-sp" },
+
+  { padroes: ["rio de janeiro"], cidade: "rm-rio-de-janeiro-rj" },
+  { padroes: ["belo horizonte"], cidade: "rm-belo-horizonte-mg" },
+
+  // DF — inclui nomes de circunscrições/RAs conhecidas (nem toda matrícula
+  // do DF tem "Brasília" ou "Distrito Federal" literal no comarca_uf; o DF
+  // tem múltiplas circunscrições judiciárias). Fica por último porque
+  // "planaltina" aqui só deve casar quando a entrada específica de GO
+  // acima já foi descartada (UF não era go).
+  {
+    padroes: [
+      "brasilia", "distrito federal", "taguatinga", "ceilandia", "sobradinho",
+      "gama", "nucleo bandeirante", "santa maria", "brazlandia", "planaltina",
+    ],
+    cidade: "brasilia-df",
+  },
 ];
+
+// Padrões de identificação de REGIÃO dentro de cada cidade — cada cidade
+// tem sua própria lista, porque a convenção de endereço muda de lugar
+// pra lugar (DF usa código de quadra, outras cidades podem usar nome de
+// bairro/condomínio direto).
+const PADROES_REGIAO_POR_CIDADE = {
+  "brasilia-df": [
+    { padroes: ["sqsw", "sudoeste"], regiao: "setor sudoeste" },
+    { padroes: ["sqnw", "noroeste"], regiao: "noroeste" },
+    { padroes: ["shis", "lago sul"], regiao: "lago sul" },
+    { padroes: ["shin", "lago norte"], regiao: "lago norte" },
+    { padroes: ["sqs", "asa sul"], regiao: "asa sul" },
+    { padroes: ["sqn", "asa norte"], regiao: "asa norte" },
+    { padroes: ["aguas claras"], regiao: "aguas claras" },
+    { padroes: ["vicente pires"], regiao: "vicente pires" },
+    { padroes: ["taguatinga"], regiao: "taguatinga" },
+    { padroes: ["ceilandia"], regiao: "ceilandia" },
+    { padroes: ["samambaia"], regiao: "samambaia" },
+    { padroes: ["guara"], regiao: "guara" },
+    { padroes: ["recanto das emas"], regiao: "recanto das emas" },
+    { padroes: ["gama"], regiao: "gama" },
+    { padroes: ["sobradinho"], regiao: "sobradinho" },
+    { padroes: ["planaltina"], regiao: "planaltina" },
+  ],
+  "cidade-ocidental-go": [
+    { padroes: ["damha"], regiao: "damha" },
+    { padroes: ["alphaville"], regiao: "alphaville" },
+  ],
+  // As demais cidades novas ainda não têm sub-região mapeada — caem no
+  // valor médio da cidade (quando configurado) até haver dado de bairro.
+};
+
+// Preço de último recurso quando a cidade nem consta em
+// PRECO_M2_POR_CIDADE ainda (ex: CAIXA atribuiu uma cidade nova que o
+// time ainda não configurou, ou uma das 16 cidades novas que já são
+// RECONHECIDAS mas ainda não têm preço validado — ver nota abaixo).
+// Propositalmente conservador — sempre marca revisão manual, nunca deve
+// ser usado pra fechar um valor "de verdade".
+const VALOR_M2_CIDADE_NAO_CONFIGURADA = 5000;
 
 function identificarCidade(comarcaUf) {
   const texto = normalizar(comarcaUf);
-  if (texto.includes("brasilia") || texto.includes("df")) return "brasilia-df";
-  return "brasilia-df";
+  const ufDetectada = extrairUF(comarcaUf);
+
+  for (const { padroes, uf: ufExigida, cidade } of PADROES_CIDADE) {
+    const bateNome = padroes.some((p) => texto.includes(p));
+    if (!bateNome) continue;
+    if (ufExigida && ufDetectada !== ufExigida) continue; // nome bate, mas UF não confirma — evita colisão
+    return cidade;
+  }
+  return null; // cidade não reconhecida — não inventar, sinalizar
 }
 
-function identificarRegiao(enderecoCompleto, tabelaRegioes) {
+function identificarRegiao(enderecoCompleto, cidade) {
+  const padroesDaCidade = PADROES_REGIAO_POR_CIDADE[cidade];
+  if (!padroesDaCidade) return null;
   const texto = normalizar(enderecoCompleto);
-  for (const { padroes, regiao } of PADROES_REGIAO_DF) {
-    if (padroes.some((p) => texto.includes(p)) && tabelaRegioes[regiao]) {
-      return regiao;
-    }
+  for (const { padroes, regiao } of padroesDaCidade) {
+    if (padroes.some((p) => texto.includes(p))) return regiao;
   }
   return null;
 }
 
 function obterPrecoM2(dadosExtraidos) {
   const cidade = identificarCidade(dadosExtraidos.comarca_uf);
+
+  if (!cidade || !PRECO_M2_POR_CIDADE[cidade]) {
+    // Cidade não configurada ainda — não travamos o cálculo, mas
+    // deixamos bem explícito que é um chute de última instância.
+    return {
+      precoM2: VALOR_M2_CIDADE_NAO_CONFIGURADA,
+      fonte: "cidade_nao_configurada",
+      regiao: null,
+      cidade: cidade || "nao_identificada",
+    };
+  }
+
   const tabelaCidade = PRECO_M2_POR_CIDADE[cidade];
-  const regiao = identificarRegiao(dadosExtraidos.endereco_completo, tabelaCidade.regioes);
+  const regiao = identificarRegiao(dadosExtraidos.endereco_completo, cidade);
   const infoRegiao = regiao ? tabelaCidade.regioes[regiao] : null;
 
   return {
@@ -169,7 +292,7 @@ function confiancaExigeRevisao(confiancaExtracao) {
 // resposta principal — só loga o erro no console da Vercel.
 async function gravarHistorico(dados, calculo, respostaFinal) {
   if (!sql) {
-    console.warn("DATABASE_URL não configurada — pulando gravação de histórico.");
+    console.warn("Nenhuma variável de conexão do banco encontrada — pulando gravação de histórico.");
     return;
   }
   try {
@@ -179,7 +302,7 @@ async function gravarHistorico(dados, calculo, respostaFinal) {
         area_privativa_m2, area_total_m2, vaga_garagem,
         preco_m2_utilizado, fonte_preco_m2, valor_estimado, fator_ajuste,
         confianca_extracao, imovel_pertence_caixa, onus_ativos, alertas_extracao,
-        precisa_revisao_manual, extracao_bruta, precificacao_bruta
+        precisa_revisao_manual, extracao_bruta, precificacao_bruta, tempo_total_ms
       ) VALUES (
         ${dados.numero_matricula || null}, ${dados.endereco_completo || null},
         ${calculo.cidade}, ${calculo.regiao},
@@ -189,7 +312,7 @@ async function gravarHistorico(dados, calculo, respostaFinal) {
         ${dados.confianca_extracao || null}, ${dados.imovel_pertence_caixa ?? null},
         ${JSON.stringify(dados.onus_ativos || [])}, ${JSON.stringify(dados.alertas || [])},
         ${respostaFinal.precisa_revisao_manual},
-        ${JSON.stringify(dados)}, ${JSON.stringify(respostaFinal)}
+        ${JSON.stringify(dados)}, ${JSON.stringify(respostaFinal)}, ${calculo.tempoTotalMs}
       )
     `;
   } catch (dbErr) {
@@ -201,6 +324,8 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ erro: "Método não permitido. Use POST." });
   }
+
+  const inicioPrecificacao = Date.now();
 
   try {
     const dados = req.body;
@@ -237,6 +362,17 @@ export default async function handler(req, res) {
       dados.imovel_pertence_caixa === null ||
       dados.imovel_pertence_caixa === undefined;
 
+    // Tempo de extração vem do CLIENTE (só ele sabe quanto levou a
+    // chamada ao /api/extract — o price.js não tem como medir isso
+    // sozinho, já que são duas funções serverless separadas). Tempo de
+    // precificação é medido aqui mesmo, no servidor, e é sempre confiável.
+    const tempoExtracaoMs = Number.isFinite(Number(dados._tempo_extracao_ms))
+      ? Number(dados._tempo_extracao_ms)
+      : null;
+    const tempoPrecificacaoMs = Date.now() - inicioPrecificacao;
+    const tempoTotalMs = tempoExtracaoMs !== null ? tempoExtracaoMs + tempoPrecificacaoMs : null;
+    const LIMITE_SLA_MS = 5 * 60 * 1000; // 5 minutos — item 9.5 do Anexo I
+
     const respostaFinal = {
       valor_estimado: valorEstimado,
       moeda: "BRL",
@@ -258,13 +394,19 @@ export default async function handler(req, res) {
         onus_ativos: dados.onus_ativos || [],
         alertas_extracao: dados.alertas || [],
       },
+      tempo_processamento: {
+        extracao_ms: tempoExtracaoMs,
+        precificacao_ms: tempoPrecificacaoMs,
+        total_ms: tempoTotalMs,
+        dentro_do_sla_5min: tempoTotalMs !== null ? tempoTotalMs <= LIMITE_SLA_MS : null,
+      },
       precisa_revisao_manual: precisaRevisaoManual,
       timestamp: new Date().toISOString(),
     };
 
     // Grava histórico ANTES de responder, mas sem deixar isso travar a
     // resposta em caso de erro no banco.
-    await gravarHistorico(dados, { precoM2, fonte, regiao, cidade, ajuste }, respostaFinal);
+    await gravarHistorico(dados, { precoM2, fonte, regiao, cidade, ajuste, tempoTotalMs }, respostaFinal);
 
     return res.status(200).json(respostaFinal);
   } catch (err) {
