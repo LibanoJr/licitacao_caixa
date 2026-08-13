@@ -150,6 +150,12 @@
     <div class="linha"><span>Fonte do preço/m²</span><strong id="d-fonte">—</strong></div>
     <div class="linha"><span>Fator de ajuste</span><strong id="d-ajuste">—</strong></div>
 
+    <div class="secao-titulo">SLA (item 9.5 do edital — meta: até 5 minutos)</div>
+    <div class="linha"><span>Tempo de extração (Gemini)</span><strong id="d-tempo-extracao">—</strong></div>
+    <div class="linha"><span>Tempo de precificação</span><strong id="d-tempo-precificacao">—</strong></div>
+    <div class="linha"><span>Tempo total (ponta a ponta)</span><strong id="d-tempo-total">—</strong></div>
+    <div id="badge-sla"></div>
+
     <div class="secao-titulo">Contexto da extração</div>
     <div class="linha"><span>Confiança da extração</span><strong id="d-confianca">—</strong></div>
     <div class="linha"><span>Pertence à CAIXA</span><strong id="d-pertence">—</strong></div>
@@ -217,6 +223,7 @@ btn.addEventListener('click', async () => {
   marcarStep(stepPrice, '');
 
   try {
+    const t0 = performance.now(); // início real do processamento (SLA conta a partir daqui)
     const fileBase64 = await fileToBase64(arquivo);
 
     const headersExtract = { 'Content-Type': 'application/json' };
@@ -228,6 +235,7 @@ btn.addEventListener('click', async () => {
       body: JSON.stringify({ fileBase64 }),
     });
     const dadosExtraidos = await respExtract.json();
+    const t1 = performance.now(); // extração concluída
 
     if (!respExtract.ok) {
       marcarStep(stepExtract, 'erro');
@@ -236,18 +244,32 @@ btn.addEventListener('click', async () => {
     marcarStep(stepExtract, 'ok');
     marcarStep(stepPrice, 'ativo');
 
+    // Envia os dados extraídos + os tempos medidos até aqui, pra ficarem
+    // registrados no histórico junto com o resultado (SLA real, não estimado).
+    const payloadPrice = {
+      ...dadosExtraidos,
+      _tempo_extracao_ms: Math.round(t1 - t0),
+    };
+
     const respPrice = await fetch('/api/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(dadosExtraidos),
+      body: JSON.stringify(payloadPrice),
     });
     const dadosPrecificacao = await respPrice.json();
+    const t2 = performance.now(); // precificação concluída — fim do SLA
 
     if (!respPrice.ok) {
       marcarStep(stepPrice, 'erro');
       throw new Error(dadosPrecificacao.erro || 'Erro ao calcular precificação.');
     }
     marcarStep(stepPrice, 'ok');
+
+    const tempoExtracaoMs = Math.round(t1 - t0);
+    const tempoPrecificacaoMs = Math.round(t2 - t1);
+    const tempoTotalMs = Math.round(t2 - t0);
+    const LIMITE_SLA_MS = 5 * 60 * 1000; // 5 minutos, item 9.5 do Anexo I
+
 
     // Renderiza resultado
     document.getElementById('valor-principal').textContent = fmtBRL(dadosPrecificacao.valor_estimado);
@@ -280,6 +302,17 @@ btn.addEventListener('click', async () => {
       (dadosExtraidos.onus_ativos && dadosExtraidos.onus_ativos.length)
         ? dadosExtraidos.onus_ativos.join('; ')
         : 'Nenhum identificado';
+
+    // SLA — item 9.5 do edital exige atendimento em até 5 minutos
+    document.getElementById('d-tempo-extracao').textContent = `${(tempoExtracaoMs / 1000).toFixed(1)}s`;
+    document.getElementById('d-tempo-precificacao').textContent = `${(tempoPrecificacaoMs / 1000).toFixed(1)}s`;
+    document.getElementById('d-tempo-total').textContent = `${(tempoTotalMs / 1000).toFixed(1)}s`;
+    const badgeSla = document.getElementById('badge-sla');
+    if (tempoTotalMs <= LIMITE_SLA_MS) {
+      badgeSla.innerHTML = `<span class="badge ok">✓ DENTRO DO SLA (${(tempoTotalMs / 1000).toFixed(1)}s de 300s permitidos)</span>`;
+    } else {
+      badgeSla.innerHTML = `<span class="badge bad">✗ FORA DO SLA — levou ${(tempoTotalMs / 1000).toFixed(1)}s, limite é 300s</span>`;
+    }
 
     const listaAlertas = document.getElementById('lista-alertas');
     if (dadosExtraidos.alertas && dadosExtraidos.alertas.length) {
