@@ -206,10 +206,12 @@ function badgeConfianca(nivel) {
 }
 
 btn.addEventListener('click', async () => {
+  console.log('[DEBUG 0] Botão clicado.');
   erroBox.style.display = 'none';
   painelResultado.style.display = 'none';
 
   const arquivo = arquivoInput.files[0];
+  console.log('[DEBUG 0.5] Arquivo selecionado:', arquivo ? `${arquivo.name} (${(arquivo.size / 1024 / 1024).toFixed(2)} MB)` : 'NENHUM');
   if (!arquivo) {
     erroBox.style.display = 'block';
     erroBox.textContent = 'Selecione um arquivo PDF primeiro.';
@@ -223,18 +225,23 @@ btn.addEventListener('click', async () => {
   marcarStep(stepPrice, '');
 
   try {
+    console.log('[DEBUG 1] Clique registrado, iniciando processamento...');
     const t0 = performance.now(); // início real do processamento (SLA conta a partir daqui)
     const fileBase64 = await fileToBase64(arquivo);
+    console.log('[DEBUG 2] Arquivo convertido pra base64, tamanho:', fileBase64.length, 'caracteres');
 
     const headersExtract = { 'Content-Type': 'application/json' };
     if (chaveInput.value.trim()) headersExtract['x-app-key'] = chaveInput.value.trim();
 
+    console.log('[DEBUG 3] Prestes a chamar /api/extract...');
     const respExtract = await fetch('/api/extract', {
       method: 'POST',
       headers: headersExtract,
       body: JSON.stringify({ fileBase64 }),
     });
+    console.log('[DEBUG 4] /api/extract respondeu, status:', respExtract.status);
     const dadosExtraidos = await respExtract.json();
+    console.log('[DEBUG 5] JSON da extração lido com sucesso');
     const t1 = performance.now(); // extração concluída
 
     if (!respExtract.ok) {
@@ -243,6 +250,7 @@ btn.addEventListener('click', async () => {
     }
     marcarStep(stepExtract, 'ok');
     marcarStep(stepPrice, 'ativo');
+    console.log('[DEBUG 6] Extração marcada como OK, prestes a chamar /api/price...');
 
     // Envia os dados extraídos + os tempos medidos até aqui, pra ficarem
     // registrados no histórico junto com o resultado (SLA real, não estimado).
@@ -250,13 +258,16 @@ btn.addEventListener('click', async () => {
       ...dadosExtraidos,
       _tempo_extracao_ms: Math.round(t1 - t0),
     };
+    console.log('[DEBUG 7] Payload pra /api/price montado, chamando agora...');
 
     const respPrice = await fetch('/api/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payloadPrice),
     });
+    console.log('[DEBUG 8] /api/price respondeu, status:', respPrice.status);
     const dadosPrecificacao = await respPrice.json();
+    console.log('[DEBUG 9] JSON da precificação lido com sucesso');
     const t2 = performance.now(); // precificação concluída — fim do SLA
 
     if (!respPrice.ok) {
@@ -264,6 +275,7 @@ btn.addEventListener('click', async () => {
       throw new Error(dadosPrecificacao.erro || 'Erro ao calcular precificação.');
     }
     marcarStep(stepPrice, 'ok');
+    console.log('[DEBUG 10] Tudo certo, renderizando resultado.');
 
     const tempoExtracaoMs = Math.round(t1 - t0);
     const tempoPrecificacaoMs = Math.round(t2 - t1);
@@ -328,9 +340,11 @@ btn.addEventListener('click', async () => {
 
     painelResultado.style.display = 'block';
   } catch (err) {
+    console.error('[DEBUG ERRO] Exceção capturada:', err);
     erroBox.style.display = 'block';
     erroBox.textContent = 'Erro: ' + err.message;
   } finally {
+    console.log('[DEBUG FIM] Bloco finally executado — processamento encerrado (com ou sem sucesso).');
     btn.disabled = false;
     btn.textContent = 'Processar documento';
   }
