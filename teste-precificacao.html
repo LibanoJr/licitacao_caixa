@@ -186,7 +186,7 @@ const fmtBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', curren
 
 function marcarStep(el, estado) {
   el.classList.remove('ativo', 'ok', 'erro');
-  el.classList.add(estado);
+  if (estado) el.classList.add(estado); // '' é usado de propósito pra "resetar" — classList.add('') lança erro no navegador
 }
 
 function fileToBase64(file) {
