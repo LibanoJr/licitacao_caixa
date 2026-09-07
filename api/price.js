@@ -1,274 +1,246 @@
-// api/price.js
-// Endpoint de precificação — Edital CR 12/2026 CAIXA (GEHPA)
+// api/extract.js
+// Extração de dados de Certidão de Inteiro Teor via Gemini — CR 12/2026 CAIXA (GEHPA)
 //
-// Recebe DIRETO o JSON que o api/extract.js devolve, calcula um valor
-// estimado, e grava um registro de auditoria no banco (Neon Postgres,
-// plano gratuito). Se o banco falhar, a precificação NÃO quebra — só loga
-// o erro. Gravar histórico é importante, mas nunca pode ser a razão de
-// derrubar a resposta pro usuário.
-//
-// ⚠️ LEIA ANTES DE USAR EM PRODUÇÃO:
-// 1) obterPrecoM2() é a peça DESCARTÁVEL deste arquivo — tabela fixa hoje,
-//    vira chamada a modelo treinado quando a base de dados de treino
-//    chegar. O contrato (recebe dados extraídos, devolve preço) não muda.
-// 2) Região é inferida do endereço por palavras-chave (convenção de
-//    quadras do DF) — best-effort, marca revisão manual quando não
-//    reconhece.
-// 3) "quartos"/"idade_imovel" não existem no schema do extract.js — só
-//    entram no ajuste se vierem manualmente.
+// SYSTEM_PROMPT e RESPONSE_SCHEMA são a parte de domínio — mantidos como
+// estavam. Mudanças desta revisão são de infraestrutura: segurança,
+// robustez, LGPD, e agora controle de custo (opt-in).
 
 import { neon } from "@neondatabase/serverless";
 
 const sql = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null;
 
-// ============================================================
-// MOTOR DE PRECIFICAÇÃO — parte que será substituída pelo modelo treinado
-// ============================================================
+// Limite diário de chamadas ao Gemini — OPCIONAL. Se a variável de
+// ambiente LIMITE_DIARIO_GEMINI não for configurada na Vercel, este
+// bloco fica completamente inativo e o comportamento é IDÊNTICO ao de
+// antes (sem limite, sem checagem, sem mudança de fluxo).
+const LIMITE_DIARIO_GEMINI = process.env.LIMITE_DIARIO_GEMINI
+  ? Number(process.env.LIMITE_DIARIO_GEMINI)
+  : null;
 
-const PRECO_M2_POR_CIDADE = {
-  "brasilia-df": {
-    valor_medio_fallback: 6000,
-    regioes: {
-      "setor sudoeste": { valor: 12000, fonte: "estimativa_terceiro" },
-      "noroeste": { valor: 11500, fonte: "placeholder" },
-      "lago sul": { valor: 12500, fonte: "estimativa_terceiro" },
-      "lago norte": { valor: 8500, fonte: "placeholder" },
-      "asa sul": { valor: 9114, fonte: "estimativa_terceiro" },
-      "asa norte": { valor: 9000, fonte: "placeholder" },
-      "aguas claras": { valor: 8545, fonte: "estimativa_terceiro" },
-      "vicente pires": { valor: 6500, fonte: "placeholder" },
-      "guara": { valor: 6253, fonte: "estimativa_terceiro" },
-      "taguatinga": { valor: 5500, fonte: "placeholder" },
-      "sobradinho": { valor: 4500, fonte: "placeholder" },
-      "gama": { valor: 4200, fonte: "placeholder" },
-      "samambaia": { valor: 4000, fonte: "placeholder" },
-      "ceilandia": { valor: 3800, fonte: "placeholder" },
-      "recanto das emas": { valor: 3800, fonte: "placeholder" },
-      "planaltina": { valor: 3500, fonte: "placeholder" },
+const SYSTEM_PROMPT = `Você é um especialista em análise de matrículas de imóveis e certidões de inteiro teor de cartórios de registro de imóveis no Brasil, atuando para a Caixa Econômica Federal em precificação de imóveis para leilão (GEHPA).
+
+Os documentos são "Certidões de Inteiro Teor", contendo o histórico completo da matrícula: o registro do imóvel seguido de uma sequência de Averbações (AV-) e Registros (R-) em ordem cronológica, cada um com um código, protocolo, data e teor (incorporação, construção, instituição de condomínio, convenção, compra e venda, alienação fiduciária, cancelamento, consolidação de domínio, etc.).
+
+Leia cuidadosamente TODO o histórico de atos, na ordem em que aparecem, antes de responder. É essencial identificar corretamente:
+- Quem é o proprietário ATUAL do imóvel — o resultado final da cadeia de atos, não o proprietário original do topo do documento. Se houve compra e venda posterior, o comprador é o novo proprietário. Se houve consolidação de domínio em favor da CAIXA ECONÔMICA FEDERAL, a Caixa é a proprietária atual.
+- Ônus e gravames ATIVOS: uma alienação fiduciária ou hipoteca só é ativa se não houver, em ato posterior, um cancelamento explícito dela. Se foi cancelada, ela vai em onus_cancelados, não em onus_ativos.
+- Se o imóvel foi objeto de consolidação de domínio (retomado por inadimplência) em favor da Caixa — indicador central para leilão.
+
+Só inclua em historico_atos_relevantes os atos que mudam propriedade, criam/cancelam ônus, ou fixam valores (ignore atos puramente administrativos, como averbação de código do imóvel). Limite a 8 itens.
+
+Se um campo não existir no documento, use null ou lista vazia. Nunca invente informação que não esteja no texto.
+
+Critério para confianca_extracao (aplique com rigor — na dúvida entre dois níveis, escolha sempre o mais baixo):
+- "baixa": há texto ilegível, cortado, borrado, páginas faltando, ou informação central (proprietário atual, ônus ativos) ambígua ou conflitante entre trechos do documento.
+- "media": o essencial (proprietário atual, ônus ativos) está claro, mas algum campo secundário (área, endereço completo, valores) está incerto, parcialmente ilegível ou precisou ser inferido.
+- "alta": todos os campos relevantes estão claramente legíveis, sem ambiguidade e sem necessidade de inferência.
+
+Critério para imovel_pertence_caixa: só marque true ou false se o texto permitir concluir isso com segurança. Se não for possível determinar com confiança se a Caixa Econômica Federal é a proprietária atual, retorne null e explique o motivo em 'alertas' — não arrisque um chute nesse campo, ele é usado para decisão de leilão.`;
+
+const RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    numero_matricula: { type: "STRING", nullable: true },
+    cnm: { type: "STRING", nullable: true },
+    cartorio_nome: { type: "STRING", nullable: true },
+    comarca_uf: { type: "STRING", nullable: true },
+    selo_digital: { type: "STRING", nullable: true },
+    data_certidao: { type: "STRING", nullable: true },
+    tipo_imovel: { type: "STRING", nullable: true },
+    endereco_completo: { type: "STRING", nullable: true },
+    area_privativa_m2: { type: "STRING", nullable: true },
+    area_total_m2: { type: "STRING", nullable: true },
+    area_comum_m2: { type: "STRING", nullable: true },
+    vaga_garagem: { type: "BOOLEAN", nullable: true },
+    proprietario_atual_nome: { type: "STRING", nullable: true },
+    proprietario_atual_documento: { type: "STRING", nullable: true },
+    imovel_pertence_caixa: { type: "BOOLEAN", nullable: true },
+    matricula_origem: { type: "STRING", nullable: true },
+    programa_habitacional: { type: "STRING", nullable: true },
+    historico_atos_relevantes: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          codigo: { type: "STRING" },
+          data: { type: "STRING" },
+          tipo: { type: "STRING" },
+          resumo: { type: "STRING" }
+        }
+      }
     },
+    onus_ativos: { type: "ARRAY", items: { type: "STRING" } },
+    onus_cancelados: { type: "ARRAY", items: { type: "STRING" } },
+    valores_mencionados: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          tipo: { type: "STRING" },
+          valor: { type: "STRING" }
+        }
+      }
+    },
+    alertas: { type: "ARRAY", items: { type: "STRING" } },
+    confianca_extracao: { type: "STRING", enum: ["alta", "media", "baixa"] }
   },
+  required: ["numero_matricula", "tipo_imovel", "imovel_pertence_caixa", "confianca_extracao"]
 };
 
-const PADROES_REGIAO_DF = [
-  { padroes: ["sqsw", "sudoeste"], regiao: "setor sudoeste" },
-  { padroes: ["sqnw", "noroeste"], regiao: "noroeste" },
-  { padroes: ["shis", "lago sul"], regiao: "lago sul" },
-  { padroes: ["shin", "lago norte"], regiao: "lago norte" },
-  { padroes: ["sqs", "asa sul"], regiao: "asa sul" },
-  { padroes: ["sqn", "asa norte"], regiao: "asa norte" },
-  { padroes: ["aguas claras"], regiao: "aguas claras" },
-  { padroes: ["vicente pires"], regiao: "vicente pires" },
-  { padroes: ["taguatinga"], regiao: "taguatinga" },
-  { padroes: ["ceilandia"], regiao: "ceilandia" },
-  { padroes: ["samambaia"], regiao: "samambaia" },
-  { padroes: ["guara"], regiao: "guara" },
-  { padroes: ["recanto das emas"], regiao: "recanto das emas" },
-  { padroes: ["gama"], regiao: "gama" },
-  { padroes: ["sobradinho"], regiao: "sobradinho" },
-  { padroes: ["planaltina"], regiao: "planaltina" },
-];
-
-function identificarCidade(comarcaUf) {
-  const texto = normalizar(comarcaUf);
-  if (texto.includes("brasilia") || texto.includes("df")) return "brasilia-df";
-  return "brasilia-df";
-}
-
-function identificarRegiao(enderecoCompleto, tabelaRegioes) {
-  const texto = normalizar(enderecoCompleto);
-  for (const { padroes, regiao } of PADROES_REGIAO_DF) {
-    if (padroes.some((p) => texto.includes(p)) && tabelaRegioes[regiao]) {
-      return regiao;
+async function callGeminiWithRetry(url, body, headers, maxRetries = 2) {
+  let lastResponse;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (response.status !== 429 && response.status !== 500 && response.status !== 503) {
+      return response;
+    }
+    lastResponse = response;
+    if (attempt < maxRetries) {
+      const waitMs = 1500 * Math.pow(2, attempt);
+      await new Promise(r => setTimeout(r, waitMs));
     }
   }
-  return null;
+  return lastResponse;
 }
 
-function obterPrecoM2(dadosExtraidos) {
-  const cidade = identificarCidade(dadosExtraidos.comarca_uf);
-  const tabelaCidade = PRECO_M2_POR_CIDADE[cidade];
-  const regiao = identificarRegiao(dadosExtraidos.endereco_completo, tabelaCidade.regioes);
-  const infoRegiao = regiao ? tabelaCidade.regioes[regiao] : null;
-
-  return {
-    precoM2: infoRegiao ? infoRegiao.valor : tabelaCidade.valor_medio_fallback,
-    fonte: infoRegiao ? infoRegiao.fonte : "fallback_medio_cidade",
-    regiao,
-    cidade,
-  };
-}
-
-// ============================================================
-// CAMADA ESTÁVEL — parsing, validação, resposta, auditoria
-// ============================================================
-
-function normalizar(texto) {
-  if (!texto) return "";
-  return texto
-    .toString()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-
-// Trata os dois formatos possíveis: brasileiro (vírgula decimal, ponto
-// milhar — ex: "40.002,50") e internacional/JSON (ponto decimal — ex:
-// "80.5"). O extract.js não força uma convenção específica nesses campos,
-// então os dois formatos são esperados na prática.
-function parseAreaString(valor) {
-  if (valor === null || valor === undefined) return null;
-  let texto = valor.toString().replace(/m²|m2/gi, "").trim();
-  if (!texto) return null;
-
-  const temVirgula = texto.includes(",");
-  const qtdPontos = (texto.match(/\./g) || []).length;
-
-  if (temVirgula) {
-    // Formato brasileiro: ponto é separador de milhar, vírgula é decimal
-    texto = texto.replace(/\./g, "").replace(",", ".");
-  } else if (qtdPontos > 1) {
-    // Mais de um ponto só faz sentido como separador de milhar
-    // (ex: "1.234.567") — não tem convenção com múltiplos pontos decimais
-    texto = texto.replace(/\./g, "");
-  }
-  // Um único ponto sem vírgula (ex: "80.5") é tratado como decimal —
-  // mais seguro do que assumir milhar, que exigiria área implausível.
-
-  const num = parseFloat(texto);
-  return Number.isFinite(num) && num > 0 ? num : null;
-}
-
-function calcularAjuste(dados) {
-  let ajuste = 1.0;
-  const detalhes = [];
-
-  if (dados.vaga_garagem === true) {
-    ajuste *= 1.03;
-    detalhes.push("+3% (possui vaga de garagem)");
-  }
-  const quartos = Number(dados.quartos);
-  if (quartos >= 3) {
-    ajuste *= 1.03;
-    detalhes.push("+3% (3+ quartos — informado manualmente)");
-  }
-  const idade = Number(dados.idade_imovel);
-  if (idade && idade > 30) {
-    ajuste *= 0.95;
-    detalhes.push("-5% (imóvel com mais de 30 anos — informado manualmente)");
-  }
-
-  return { ajuste, detalhes };
-}
-
-function confiancaExigeRevisao(confiancaExtracao) {
-  return confiancaExtracao !== "alta";
-}
-
-// Grava o registro de auditoria. NUNCA deixa uma falha aqui derrubar a
-// resposta principal — só loga o erro no console da Vercel.
-async function gravarHistorico(dados, calculo, respostaFinal) {
-  if (!sql) {
-    console.warn("DATABASE_URL não configurada — pulando gravação de histórico.");
-    return;
-  }
+function pareceSerPdfValido(fileBase64) {
   try {
+    const amostra = Buffer.from(fileBase64.slice(0, 40), 'base64').toString('utf-8');
+    return amostra.startsWith('%PDF');
+  } catch {
+    return false;
+  }
+}
+
+// Só age se LIMITE_DIARIO_GEMINI estiver configurado. Se o banco falhar
+// ao verificar, DEIXA PASSAR (fail-open) — uma falha no monitoramento
+// nunca deve travar o produto principal.
+async function verificarLimiteDiario() {
+  if (!sql || !LIMITE_DIARIO_GEMINI) return { bloqueado: false, totalHoje: 0 };
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const resultado = await sql`SELECT total_chamadas FROM uso_gemini WHERE data = ${hoje}`;
+    const totalHoje = resultado[0]?.total_chamadas || 0;
+    return { bloqueado: totalHoje >= LIMITE_DIARIO_GEMINI, totalHoje };
+  } catch (err) {
+    console.error('Falha ao checar limite diário (permitindo chamada):', err.message);
+    return { bloqueado: false, totalHoje: 0 };
+  }
+}
+
+// Registra a chamada pro contador. Silenciosamente ignora erro — nunca
+// derruba a resposta principal por causa disso.
+async function registrarChamadaGemini(sucesso) {
+  if (!sql) return;
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
     await sql`
-      INSERT INTO precificacoes (
-        numero_matricula, endereco_completo, cidade_identificada, regiao_identificada,
-        area_privativa_m2, area_total_m2, vaga_garagem,
-        preco_m2_utilizado, fonte_preco_m2, valor_estimado, fator_ajuste,
-        confianca_extracao, imovel_pertence_caixa, onus_ativos, alertas_extracao,
-        precisa_revisao_manual, extracao_bruta, precificacao_bruta
-      ) VALUES (
-        ${dados.numero_matricula || null}, ${dados.endereco_completo || null},
-        ${calculo.cidade}, ${calculo.regiao},
-        ${parseAreaString(dados.area_privativa_m2)}, ${parseAreaString(dados.area_total_m2)},
-        ${dados.vaga_garagem ?? null},
-        ${calculo.precoM2}, ${calculo.fonte}, ${respostaFinal.valor_estimado}, ${calculo.ajuste},
-        ${dados.confianca_extracao || null}, ${dados.imovel_pertence_caixa ?? null},
-        ${JSON.stringify(dados.onus_ativos || [])}, ${JSON.stringify(dados.alertas || [])},
-        ${respostaFinal.precisa_revisao_manual},
-        ${JSON.stringify(dados)}, ${JSON.stringify(respostaFinal)}
-      )
+      INSERT INTO uso_gemini (data, total_chamadas, total_sucesso, total_erro)
+      VALUES (${hoje}, 1, ${sucesso ? 1 : 0}, ${sucesso ? 0 : 1})
+      ON CONFLICT (data) DO UPDATE SET
+        total_chamadas = uso_gemini.total_chamadas + 1,
+        total_sucesso = uso_gemini.total_sucesso + ${sucesso ? 1 : 0},
+        total_erro = uso_gemini.total_erro + ${sucesso ? 0 : 1}
     `;
-  } catch (dbErr) {
-    console.error("Falha ao gravar histórico (não afeta a resposta):", dbErr.message);
+  } catch (err) {
+    console.error('Falha ao registrar uso (não afeta a resposta):', err.message);
   }
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ erro: "Método não permitido. Use POST." });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Método não permitido' });
   }
 
-  try {
-    const dados = req.body;
+  const expectedKey = process.env.APP_ACCESS_KEY;
+  if (expectedKey) {
+    const providedKey = req.headers['x-app-key'];
+    if (providedKey !== expectedKey) {
+      return res.status(401).json({ error: 'Chave de acesso inválida ou ausente. Confirme a chave com quem coordena o teste.' });
+    }
+  }
 
-    if (!dados || typeof dados !== "object") {
-      return res.status(400).json({ erro: "Corpo da requisição ausente ou inválido." });
+  const { fileBase64 } = req.body || {};
+  if (!fileBase64) {
+    return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+  }
+
+  if (!pareceSerPdfValido(fileBase64)) {
+    return res.status(400).json({ error: 'O arquivo enviado não parece ser um PDF válido.' });
+  }
+
+  // Só bloqueia se LIMITE_DIARIO_GEMINI estiver configurado — sem essa
+  // env var, este trecho não muda nada do comportamento atual.
+  const { bloqueado, totalHoje } = await verificarLimiteDiario();
+  if (bloqueado) {
+    return res.status(429).json({
+      error: `Limite diário de ${LIMITE_DIARIO_GEMINI} chamadas ao Gemini atingido (${totalHoje} hoje). Ajuste LIMITE_DIARIO_GEMINI na Vercel ou aguarde o próximo dia.`
+    });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no servidor' });
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`;
+  const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey };
+
+  try {
+    const response = await callGeminiWithRetry(url, {
+      contents: [{
+        parts: [
+          { text: SYSTEM_PROMPT + "\n\nExtraia os dados deste documento conforme o schema fornecido." },
+          { inline_data: { mime_type: 'application/pdf', data: fileBase64 } }
+        ]
+      }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+        temperature: 0,
+        maxOutputTokens: 8192
+      }
+    }, headers);
+
+    // Registra a tentativa (sucesso = resposta HTTP OK do Gemini),
+    // independente do que acontecer no parsing abaixo.
+    await registrarChamadaGemini(response.ok);
+
+    if (response.status === 429) {
+      return res.status(429).json({ error: 'Limite de requisições do Gemini (tier gratuito) atingido. Aguarde cerca de 1 minuto e tente novamente.' });
+    }
+    if (response.status === 500 || response.status === 503) {
+      return res.status(502).json({ error: 'API do Gemini instável no momento. Tente novamente em alguns segundos.' });
     }
 
-    const areaPrivativa = parseAreaString(dados.area_privativa_m2);
-    const areaTotal = parseAreaString(dados.area_total_m2);
-    const area = areaPrivativa || areaTotal;
-    const origemArea = areaPrivativa
-      ? "area_privativa_m2"
-      : areaTotal
-      ? "area_total_m2 (privativa ausente)"
-      : null;
+    const data = await response.json();
 
-    if (!area) {
-      return res.status(400).json({
-        erro: "Não foi possível determinar a área do imóvel.",
-        detalhe: "area_privativa_m2 e area_total_m2 vieram ambos nulos/inválidos no JSON extraído.",
+    if (data.error) {
+      return res.status(500).json({ error: "Erro na API do Google: " + data.error.message });
+    }
+
+    const candidate = data.candidates && data.candidates[0];
+    const text = candidate?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      return res.status(502).json({
+        error: "A IA não retornou texto. finishReason: " + (candidate && candidate.finishReason)
       });
     }
 
-    const { precoM2, fonte, regiao, cidade } = obterPrecoM2(dados);
-    const valorBase = area * precoM2;
-    const { ajuste, detalhes } = calcularAjuste(dados);
-    const valorEstimado = Math.round(valorBase * ajuste);
+    const jsonStr = text.replace(/```json|```/g, '').trim();
 
-    const precisaRevisaoManual =
-      !regiao ||
-      fonte !== "estimativa_terceiro" ||
-      confiancaExigeRevisao(dados.confianca_extracao) ||
-      dados.imovel_pertence_caixa === null ||
-      dados.imovel_pertence_caixa === undefined;
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error("Resposta da IA não veio em JSON válido:", jsonStr.slice(0, 500));
+      return res.status(502).json({ error: "Resposta da IA não veio em JSON válido. Verifique os logs do servidor para detalhes." });
+    }
 
-    const respostaFinal = {
-      valor_estimado: valorEstimado,
-      moeda: "BRL",
-      detalhes_calculo: {
-        area_utilizada_m2: area,
-        origem_area: origemArea,
-        cidade_identificada: cidade,
-        endereco_original: dados.endereco_completo || null,
-        regiao_identificada: regiao || "não reconhecida (endereço não bateu com padrões conhecidos)",
-        preco_m2_utilizado: precoM2,
-        fonte_preco_m2: fonte,
-        valor_base: Math.round(valorBase),
-        fator_ajuste: ajuste,
-        ajustes_aplicados: detalhes,
-      },
-      contexto_extracao: {
-        confianca_extracao: dados.confianca_extracao || null,
-        imovel_pertence_caixa: dados.imovel_pertence_caixa ?? null,
-        onus_ativos: dados.onus_ativos || [],
-        alertas_extracao: dados.alertas || [],
-      },
-      precisa_revisao_manual: precisaRevisaoManual,
-      timestamp: new Date().toISOString(),
-    };
-
-    // Grava histórico ANTES de responder, mas sem deixar isso travar a
-    // resposta em caso de erro no banco.
-    await gravarHistorico(dados, { precoM2, fonte, regiao, cidade, ajuste }, respostaFinal);
-
-    return res.status(200).json(respostaFinal);
-  } catch (err) {
-    console.error("Erro ao calcular precificação:", err);
-    return res.status(500).json({ erro: "Erro interno ao calcular precificação." });
+    return res.status(200).json(parsed);
+  } catch (error) {
+    console.error("Falha ao processar extração:", error);
+    return res.status(500).json({ error: "Falha ao processar dados: " + error.message });
   }
 }
