@@ -150,7 +150,11 @@ const PADROES_CIDADE = [
   // "sao paulo" genérico por último (senão captura os outros dois).
   { padroes: ["campinas"], cidade: "rm-campinas-sp" },
   { padroes: ["vale do paraiba", "sao jose dos campos", "taubate"], cidade: "rm-vale-paraiba-sp" },
-  { padroes: ["sao paulo"], cidade: "rm-sao-paulo-sp" },
+  // Designada pela CAIXA em 07/09/2026 como primeira cidade real de
+  // Fluxo Pareado — especificamente a CIDADE de São Paulo/SP, não a
+  // Região Metropolitana inteira (por isso o nome não usa prefixo "rm-",
+  // diferente de Campinas/Rio/BH/Vale do Paraíba abaixo).
+  { padroes: ["sao paulo"], cidade: "sao-paulo-sp-capital" },
 
   { padroes: ["rio de janeiro"], cidade: "rm-rio-de-janeiro-rj" },
   { padroes: ["belo horizonte"], cidade: "rm-belo-horizonte-mg" },
