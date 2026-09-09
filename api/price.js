@@ -441,6 +441,85 @@ function avaliarRecusa(dados, areaPrivativa, areaTotal, area, calculo) {
   return null; // nenhum motivo de recusa — segue pro fluxo normal
 }
 
+// ============================================================
+// CHECAGEM DE ELEGIBILIDADE — sinal adicional, específico por cidade,
+// NÃO é um dos 4 motivos formais de recusa do item 9.5. Hoje só São
+// Paulo tem critério definido (carta CAIXA GEHPA de 07/09/2026). Outras
+// cidades retornam null aqui — não têm critério de elegibilidade
+// comunicado ainda, então não se aplica checagem nenhuma.
+// ============================================================
+
+const CRITERIOS_ELEGIBILIDADE_POR_CIDADE = {
+  "sao-paulo-sp-capital": {
+    tipos_imovel_aceitos: ["apartamento"],
+    area_min_m2: 35,
+    area_max_m2: 250,
+    valor_max: 2250000,
+    idade_max_anos: 20,
+    fonte: "Carta CAIXA GEHPA de 07/09/2026",
+  },
+};
+
+// Datas no historico_atos_relevantes vêm no formato DD/MM/AAAA (visto em
+// documentos reais já processados).
+function parseDataBR(texto) {
+  if (!texto) return null;
+  const match = texto.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
+  const [, dd, mm, aaaa] = match;
+  const data = new Date(Number(aaaa), Number(mm) - 1, Number(dd));
+  return Number.isNaN(data.getTime()) ? null : data;
+}
+
+// Estimativa APROXIMADA da idade da construção — não existe campo
+// direto no schema do extract.js, então inferimos pelo ato mais antigo
+// do tipo "Construção" no histórico. Se não houver esse ato, retorna
+// null (não trava, só não avalia esse critério específico).
+function estimarIdadeConstrucao(historicoAtos, agora = new Date()) {
+  if (!Array.isArray(historicoAtos)) return null;
+  const atosConstrucao = historicoAtos.filter((a) => normalizar(a.tipo).includes("construc"));
+  if (atosConstrucao.length === 0) return null;
+  const datas = atosConstrucao.map((a) => parseDataBR(a.data)).filter((d) => d !== null);
+  if (datas.length === 0) return null;
+  const maisAntiga = new Date(Math.min(...datas.map((d) => d.getTime())));
+  const anos = (agora - maisAntiga) / (1000 * 60 * 60 * 24 * 365.25);
+  return Math.floor(anos);
+}
+
+function verificarElegibilidade(dados, cidade, valorEstimado) {
+  const criterios = CRITERIOS_ELEGIBILIDADE_POR_CIDADE[cidade];
+  if (!criterios) return null; // cidade sem critério comunicado — não avalia
+
+  const motivos = [];
+  const tipoNormalizado = normalizar(dados.tipo_imovel);
+  if (!criterios.tipos_imovel_aceitos.some((t) => tipoNormalizado.includes(t))) {
+    motivos.push(`Tipo de imóvel "${dados.tipo_imovel || "não informado"}" fora do critério (aceito: ${criterios.tipos_imovel_aceitos.join(", ")})`);
+  }
+
+  const area = parseAreaString(dados.area_privativa_m2);
+  if (area !== null && (area < criterios.area_min_m2 || area > criterios.area_max_m2)) {
+    motivos.push(`Área privativa ${area} m2 fora da faixa ${criterios.area_min_m2}-${criterios.area_max_m2} m2`);
+  }
+
+  if (valorEstimado !== null && valorEstimado > criterios.valor_max) {
+    motivos.push(`Valor estimado R$ ${valorEstimado} acima do limite de R$ ${criterios.valor_max}`);
+  }
+
+  const idadeEstimada = estimarIdadeConstrucao(dados.historico_atos_relevantes);
+  if (idadeEstimada !== null && idadeEstimada > criterios.idade_max_anos) {
+    motivos.push(`Idade estimada da construção (~${idadeEstimada} anos, aproximado) acima do limite de ${criterios.idade_max_anos} anos`);
+  }
+
+  return {
+    cidade_com_criterio: cidade,
+    fonte_criterio: criterios.fonte,
+    dentro_do_criterio: motivos.length === 0,
+    motivos_fora_do_criterio: motivos,
+    idade_construcao_estimada_anos: idadeEstimada,
+    aviso: "Sinal adicional de elegibilidade, não é um dos 4 motivos formais de recusa do item 9.5. Financiamento SBPE/SFH/SFI não é verificável a partir da matrícula — não incluído nesta checagem.",
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ erro: "Método não permitido. Use POST." });
@@ -513,12 +592,15 @@ export default async function handler(req, res) {
     const { ajuste, detalhes } = calcularAjuste(dados);
     const valorEstimado = Math.round(valorBase * ajuste);
 
+    const elegibilidade = verificarElegibilidade(dados, cidade, valorEstimado);
+
     const precisaRevisaoManual =
       !regiao ||
       fonte !== "estimativa_terceiro" ||
       confiancaExigeRevisao(dados.confianca_extracao) ||
       dados.imovel_pertence_caixa === null ||
-      dados.imovel_pertence_caixa === undefined;
+      dados.imovel_pertence_caixa === undefined ||
+      (elegibilidade !== null && !elegibilidade.dentro_do_criterio);
 
     // Tempo de precificação medido aqui no servidor; extração já veio do cliente.
     const tempoPrecificacaoMs = Date.now() - inicioPrecificacao;
@@ -549,6 +631,7 @@ export default async function handler(req, res) {
         onus_ativos: dados.onus_ativos || [],
         alertas_extracao: dados.alertas || [],
       },
+      elegibilidade: elegibilidade,
       tempo_processamento: {
         extracao_ms: tempoExtracaoMs,
         precificacao_ms: tempoPrecificacaoMs,
