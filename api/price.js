@@ -209,6 +209,35 @@ function extrairUF(comarcaUf) {
   return null;
 }
 
+// Detecta QUALQUER UF do Brasil — usado só pra escolher o motivo certo de
+// recusa quando a cidade não está na tabela. Separado de extrairUF() de
+// propósito: aquela resolve colisões de nome e não pode mudar de
+// comportamento. Aqui, a sigla só vale no FIM do texto ("Curitiba/PR",
+// "Foro Central - PR"), porque siglas como SE, AL, PA e ES também são
+// palavras comuns. Nomes de estado valem em qualquer posição (exceto
+// "Pará", que é a preposição "para" sem acento).
+const SIGLAS_UF = ["ac","al","ap","am","ba","ce","df","es","go","ma","mt","ms","mg","pa","pb","pr","pe","pi","rj","rn","rs","ro","rr","sc","sp","se","to"];
+const NOMES_UF = [
+  ["mato grosso do sul", "ms"], ["mato grosso", "mt"], ["rio grande do norte", "rn"],
+  ["rio grande do sul", "rs"], ["rio de janeiro", "rj"], ["espirito santo", "es"],
+  ["santa catarina", "sc"], ["distrito federal", "df"], ["minas gerais", "mg"],
+  ["sao paulo", "sp"], ["parana", "pr"], ["paraiba", "pb"], ["pernambuco", "pe"],
+  ["alagoas", "al"], ["sergipe", "se"], ["bahia", "ba"], ["ceara", "ce"], ["piaui", "pi"],
+  ["maranhao", "ma"], ["tocantins", "to"], ["amazonas", "am"], ["amapa", "ap"],
+  ["roraima", "rr"], ["rondonia", "ro"], ["goias", "go"], ["acre", "ac"],
+];
+
+function detectarQualquerUF(comarcaUf) {
+  const texto = normalizar(comarcaUf);
+  if (!texto) return null;
+  const fim = texto.match(/(?:^|[\s\/\-(,.])([a-z]{2})\)?\s*$/);
+  if (fim && SIGLAS_UF.includes(fim[1])) return fim[1];
+  for (const [nome, uf] of NOMES_UF) {
+    if (new RegExp(`\\b${nome}\\b`).test(texto)) return uf;
+  }
+  return null;
+}
+
 // Cada entrada pode exigir uma UF específica (campo "uf") — usado só
 // onde existe colisão de nome real. Entradas sem "uf" casam só pelo nome.
 // ORDEM IMPORTA: entradas com "uf" que resolvem colisão devem vir ANTES
@@ -613,6 +642,16 @@ function avaliarRecusa(dados, areaPrivativa, areaTotal, area, calculo) {
   // que é tratado como (a) logo abaixo — nesse caso SABEMOS onde é,
   // só não temos preço de referência validado ainda).
   if (calculo.cidade === "nao_identificada") {
+    // Se a UF foi identificada com segurança, a localização É conhecida —
+    // o imóvel só está fora da cobertura do modelo. Isso é motivo (a), não
+    // (d). (d) fica pra quando nem a UF dá pra afirmar.
+    const uf = detectarQualquerUF(dados.comarca_uf);
+    if (uf) {
+      return {
+        motivo: "a",
+        fundamentacao: `Imóvel localizado fora da área de cobertura do modelo nesta versão (comarca "${dados.comarca_uf}", UF ${uf.toUpperCase()}). O modelo ${METADADOS_MODELO.versao} tem preço de referência apenas para São Paulo/SP (capital), Brasília/DF e municípios do Entorno do DF em Goiás.`,
+      };
+    }
     return {
       motivo: "d",
       fundamentacao: `Não foi possível identificar com convicção a cidade/região do imóvel a partir do endereço e comarca informados ("${dados.endereco_completo || "endereço ausente"}" / "${dados.comarca_uf || "comarca ausente"}").`,
