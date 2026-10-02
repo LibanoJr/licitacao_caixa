@@ -44,28 +44,38 @@ const sql = CONNECTION_STRING ? neon(CONNECTION_STRING) : null;
 // Isso é o que possibilita rastrear qual versão gerou qual precificação,
 // exigência explícita do item 20.14 ("controle de versão e de vigência").
 const METADADOS_MODELO = {
-  versao: "1.0.0-baseline",
+  versao: "1.1.0-baseline",
   tipo_modelo: "baseline_deterministico_referencia_regional",
-  data_atualizacao: "2026-08-24",
+  data_atualizacao: "2026-10-02",
   descricao: "Tabela de referência de preço/m² por região + ajustes percentuais fixos. Não é modelo estatístico treinado (ver Relatório do Modelo, Seção 3.1).",
+  historico_versoes: [
+    { versao: "1.0.0-baseline", data: "2026-08-24", mudanca: "Versão inicial: tabela DF + Cidade Ocidental/GO." },
+    { versao: "1.1.0-baseline", data: "2026-10-02", mudanca: "São Paulo/SP (capital) com preço/m² por bairro; correção de leitura de área com separador de milhar; motivos de revisão explícitos." },
+  ],
 };
 
 // RT pela Modelagem (item 4.3) e RT pela Precificação/Emissão (item 4.9)
 // — preencher os nomes reais assim que confirmados pelo time. Aparecer
 // em todo resultado é exigência dos itens 2.2.iii e 17.6, não é opcional.
+// Nomes e registros profissionais vêm de variáveis de ambiente na Vercel,
+// pra poder preencher/trocar sem mexer no código. Se não configurados,
+// aparecem como "PENDENTE" (nunca como null silencioso) — assim fica
+// visível no relatório que a exigência ainda não foi cumprida.
+function rt(nomeEnv, registroEnv, nomePadrao, funcao) {
+  return {
+    nome: process.env[nomeEnv] || nomePadrao || "PENDENTE — configurar " + nomeEnv,
+    registro_profissional: process.env[registroEnv] || null,
+    funcao,
+  };
+}
+
 const RESPONSAVEIS_TECNICOS = {
-  modelagem: {
-    nome: "Líbano Abboud Júnior",
-    funcao: "RT pelo Modelo de Precificação Automatizada (Ciência de Dados)",
-  },
-  analise_mercado_imobiliario: {
-    nome: null, // TODO: preencher — RT item 4.6 (Engenharia/Arquitetura + Avaliação de Imóveis)
-    funcao: "RT pela Análise das Precificações de Imóveis (Mercado Imobiliário)",
-  },
-  emissao_relatorio: {
-    nome: null, // TODO: preencher — RT item 4.9 (Engenharia/Arquitetura)
-    funcao: "RT pela Emissão do Relatório de Precificação",
-  },
+  modelagem: rt("RT_MODELAGEM_NOME", "RT_MODELAGEM_REGISTRO", "Líbano Abboud Júnior",
+    "RT pelo Modelo de Precificação Automatizada (Ciência de Dados)"),
+  analise_mercado_imobiliario: rt("RT_ANALISE_NOME", "RT_ANALISE_REGISTRO", null,
+    "RT pela Análise das Precificações de Imóveis (Mercado Imobiliário)"),
+  emissao_relatorio: rt("RT_EMISSAO_NOME", "RT_EMISSAO_REGISTRO", null,
+    "RT pela Emissão do Relatório de Precificação"),
 };
 
 // ============================================================
@@ -104,6 +114,79 @@ const PRECO_M2_POR_CIDADE = {
     regioes: {
       "damha": { valor: 4200, fonte: "placeholder_baixa_confianca" },
       "alphaville": { valor: 4200, fonte: "placeholder_baixa_confianca" },
+    },
+  },
+  // São Paulo/SP — CAPITAL (cidade designada pela CAIXA em 07/09/2026
+  // para o Fluxo Pareado). Valores = mediana do preço PEDIDO por m² de
+  // APARTAMENTOS à venda, por bairro, edição outubro/2026 de "A Corrida
+  // dos Bairros" (acorridadosbairros.com.br/sp/sao-paulo/apartamentos/),
+  // 45.870 anúncios. "n" = nº de anúncios do bairro; abaixo de 20 o
+  // resultado vai pra revisão manual. São preços de OFERTA, não de
+  // transação — não há fator de oferta aplicado nesta versão (ver
+  // Relatório do Modelo). Atualizar mensalmente (a fonte atualiza dia 1).
+  "sao-paulo-sp-capital": {
+    valor_medio_fallback: 9475, // mediana da cidade, out/2026
+    fonte_fallback: "mediana_cidade_anuncios_out2026",
+    regioes: {
+      "vila nova conceicao": { valor: 25397, n: 295, fonte: "mediana_anuncios_bairro" },
+      "jardim europa": { valor: 22840, n: 60, fonte: "mediana_anuncios_bairro" },
+      "jardim america": { valor: 20408, n: 169, fonte: "mediana_anuncios_bairro" },
+      "jardim paulistano": { valor: 19780, n: 47, fonte: "mediana_anuncios_bairro" },
+      "itaim bibi": { valor: 18919, n: 978, fonte: "mediana_anuncios_bairro" },
+      "cerqueira cesar": { valor: 18558, n: 286, fonte: "mediana_anuncios_bairro" },
+      "alto de pinheiros": { valor: 17715, n: 117, fonte: "mediana_anuncios_bairro" },
+      "jardim das perdizes": { valor: 17610, n: 48, fonte: "mediana_anuncios_bairro" },
+      "vila olimpia": { valor: 17143, n: 815, fonte: "mediana_anuncios_bairro" },
+      "moema": { valor: 16552, n: 729, fonte: "mediana_anuncios_bairro" },
+      "vila madalena": { valor: 16050, n: 412, fonte: "mediana_anuncios_bairro" },
+      "pinheiros": { valor: 15916, n: 1002, fonte: "mediana_anuncios_bairro" },
+      "jardim paulista": { valor: 15250, n: 744, fonte: "mediana_anuncios_bairro" },
+      "brooklin": { valor: 14815, n: 1013, fonte: "mediana_anuncios_bairro" },
+      "chacara klabin": { valor: 14408, n: 210, fonte: "mediana_anuncios_bairro" },
+      "vila leopoldina": { valor: 14009, n: 77, fonte: "mediana_anuncios_bairro" },
+      "alto da lapa": { valor: 13078, n: 110, fonte: "mediana_anuncios_bairro" },
+      "vila clementino": { valor: 13081, n: 490, fonte: "mediana_anuncios_bairro" },
+      "vila mariana": { valor: 12924, n: 1170, fonte: "mediana_anuncios_bairro" },
+      "pompeia": { valor: 12868, n: 146, fonte: "mediana_anuncios_bairro" },
+      "agua branca": { valor: 12750, n: 139, fonte: "mediana_anuncios_bairro" },
+      "higienopolis": { valor: 12747, n: 458, fonte: "mediana_anuncios_bairro" },
+      "campo belo": { valor: 12615, n: 1121, fonte: "mediana_anuncios_bairro" },
+      "perdizes": { valor: 12391, n: 1094, fonte: "mediana_anuncios_bairro" },
+      "barra funda": { valor: 11870, n: 171, fonte: "mediana_anuncios_bairro" },
+      "consolacao": { valor: 11411, n: 886, fonte: "mediana_anuncios_bairro" },
+      "santo amaro": { valor: 10893, n: 269, fonte: "mediana_anuncios_bairro" },
+      "lapa": { valor: 10857, n: 89, fonte: "mediana_anuncios_bairro" },
+      "analia franco": { valor: 10850, n: 1015, fonte: "mediana_anuncios_bairro" },
+      "tatuape": { valor: 10741, n: 801, fonte: "mediana_anuncios_bairro" },
+      "santa cecilia": { valor: 10525, n: 270, fonte: "mediana_anuncios_bairro" },
+      "pacaembu": { valor: 10136, n: 40, fonte: "mediana_anuncios_bairro" },
+      "ipiranga": { valor: 10105, n: 843, fonte: "mediana_anuncios_bairro" },
+      "vila maria": { valor: 10080, n: 42, fonte: "mediana_anuncios_bairro" },
+      "belenzinho": { valor: 10000, n: 121, fonte: "mediana_anuncios_bairro" },
+      "saude": { valor: 9868, n: 320, fonte: "mediana_anuncios_bairro" },
+      "butanta": { valor: 9576, n: 350, fonte: "mediana_anuncios_bairro" },
+      "casa verde": { valor: 9561, n: 54, fonte: "mediana_anuncios_bairro" },
+      "santana": { valor: 9536, n: 483, fonte: "mediana_anuncios_bairro" },
+      "aclimacao": { valor: 9384, n: 944, fonte: "mediana_anuncios_bairro" },
+      "mooca": { valor: 9355, n: 499, fonte: "mediana_anuncios_bairro" },
+      "tucuruvi": { valor: 8805, n: 172, fonte: "mediana_anuncios_bairro" },
+      "vila guilherme": { valor: 8774, n: 118, fonte: "mediana_anuncios_bairro" },
+      "vila prudente": { valor: 8696, n: 245, fonte: "mediana_anuncios_bairro" },
+      "vila sonia": { valor: 8589, n: 80, fonte: "mediana_anuncios_bairro" },
+      "interlagos": { valor: 8571, n: 36, fonte: "mediana_anuncios_bairro" },
+      "vila carrao": { valor: 8520, n: 268, fonte: "mediana_anuncios_bairro" },
+      "jaguare": { valor: 8308, n: 153, fonte: "mediana_anuncios_bairro" },
+      "vila formosa": { valor: 8258, n: 268, fonte: "mediana_anuncios_bairro" },
+      "morumbi": { valor: 8182, n: 309, fonte: "mediana_anuncios_bairro" },
+      "freguesia do o": { valor: 8000, n: 71, fonte: "mediana_anuncios_bairro" },
+      "vila matilde": { valor: 7763, n: 91, fonte: "mediana_anuncios_bairro" },
+      "cambuci": { valor: 7741, n: 268, fonte: "mediana_anuncios_bairro" },
+      "vila andrade": { valor: 7579, n: 358, fonte: "mediana_anuncios_bairro" },
+      "sapopemba": { valor: 7499, n: 12, fonte: "mediana_anuncios_bairro" },
+      "jabaquara": { valor: 7421, n: 148, fonte: "mediana_anuncios_bairro" },
+      "cidade ademar": { valor: 7419, n: 21, fonte: "mediana_anuncios_bairro" },
+      "mandaqui": { valor: 7271, n: 124, fonte: "mediana_anuncios_bairro" },
+      "itaquera": { valor: 5958, n: 104, fonte: "mediana_anuncios_bairro" },
     },
   },
   // Próximas cidades entram aqui como novas chaves.
@@ -179,8 +262,8 @@ const PADROES_CIDADE = [
 // bairro/condomínio direto).
 const PADROES_REGIAO_POR_CIDADE = {
   "brasilia-df": [
-    { padroes: ["sqsw", "sudoeste"], regiao: "setor sudoeste" },
-    { padroes: ["sqnw", "noroeste"], regiao: "noroeste" },
+    { padroes: ["sqsw", "clsw", "crsw", "sudoeste"], regiao: "setor sudoeste" },
+    { padroes: ["sqnw", "clnw", "noroeste"], regiao: "noroeste" },
     { padroes: ["shis", "lago sul"], regiao: "lago sul" },
     { padroes: ["shin", "lago norte"], regiao: "lago norte" },
     { padroes: ["sqs", "asa sul"], regiao: "asa sul" },
@@ -199,6 +282,80 @@ const PADROES_REGIAO_POR_CIDADE = {
   "cidade-ocidental-go": [
     { padroes: ["damha"], regiao: "damha" },
     { padroes: ["alphaville"], regiao: "alphaville" },
+  ],
+  // São Paulo: bairro por nome. ORDEM IMPORTA — nomes mais específicos
+  // antes dos genéricos que os contêm (ex: "vila mariana" antes de
+  // "vila maria"; "alto de pinheiros" antes de "pinheiros"). Bairros com
+  // nome genérico demais pra casar com segurança no endereço (Centro,
+  // Liberdade, Paraíso, Bela Vista, Brás, República, Luz, Penha) ficam de
+  // fora de propósito e caem no valor da cidade + revisão manual.
+  "sao-paulo-sp-capital": [
+    { padroes: ["vila nova conceicao"], regiao: "vila nova conceicao" },
+    { padroes: ["jardim europa"], regiao: "jardim europa" },
+    { padroes: ["jardim paulistano"], regiao: "jardim paulistano" },
+    { padroes: ["jardim paulista"], regiao: "jardim paulista" },
+    { padroes: ["jardim america da penha"], regiao: null }, // homônimo barato — não confundir com Jd. América
+    { padroes: ["jardim america"], regiao: "jardim america" },
+    { padroes: ["itaim bibi"], regiao: "itaim bibi" },
+    { padroes: ["cerqueira cesar"], regiao: "cerqueira cesar" },
+    { padroes: ["alto de pinheiros", "alto pinheiros"], regiao: "alto de pinheiros" },
+    { padroes: ["jardim das perdizes"], regiao: "jardim das perdizes" },
+    { padroes: ["vila olimpia"], regiao: "vila olimpia" },
+    { padroes: ["moema"], regiao: "moema" },
+    { padroes: ["vila madalena"], regiao: "vila madalena" },
+    { padroes: ["pinheiros"], regiao: "pinheiros" },
+    { padroes: ["brooklin"], regiao: "brooklin" },
+    { padroes: ["chacara klabin"], regiao: "chacara klabin" },
+    { padroes: ["vila leopoldina"], regiao: "vila leopoldina" },
+    { padroes: ["alto da lapa"], regiao: "alto da lapa" },
+    { padroes: ["lapa de baixo"], regiao: null },
+    { padroes: ["vila clementino"], regiao: "vila clementino" },
+    { padroes: ["vila mariana"], regiao: "vila mariana" },
+    { padroes: ["pompeia"], regiao: "pompeia" },
+    { padroes: ["agua branca"], regiao: "agua branca" },
+    { padroes: ["higienopolis"], regiao: "higienopolis" },
+    { padroes: ["campo belo"], regiao: "campo belo" },
+    { padroes: ["perdizes"], regiao: "perdizes" },
+    { padroes: ["barra funda"], regiao: "barra funda" },
+    { padroes: ["consolacao"], regiao: "consolacao" },
+    { padroes: ["santo amaro"], regiao: "santo amaro" },
+    { padroes: ["lapa"], regiao: "lapa" },
+    { padroes: ["analia franco"], regiao: "analia franco" },
+    { padroes: ["tatuape"], regiao: "tatuape" },
+    { padroes: ["santa cecilia"], regiao: "santa cecilia" },
+    { padroes: ["pacaembu"], regiao: "pacaembu" },
+    { padroes: ["ipiranga"], regiao: "ipiranga" },
+    { padroes: ["vila maria alta"], regiao: null },
+    { padroes: ["vila maria"], regiao: "vila maria" },
+    { padroes: ["belenzinho"], regiao: "belenzinho" },
+    { padroes: ["saude"], regiao: "saude" },
+    { padroes: ["vila butanta"], regiao: null },
+    { padroes: ["butanta"], regiao: "butanta" },
+    { padroes: ["casa verde"], regiao: "casa verde" },
+    { padroes: ["alto de santana", "chacara santana"], regiao: null },
+    { padroes: ["santana"], regiao: "santana" },
+    { padroes: ["aclimacao"], regiao: "aclimacao" },
+    { padroes: ["mooca"], regiao: "mooca" },
+    { padroes: ["tucuruvi"], regiao: "tucuruvi" },
+    { padroes: ["vila guilherme"], regiao: "vila guilherme" },
+    { padroes: ["parque da vila prudente"], regiao: null },
+    { padroes: ["vila prudente"], regiao: "vila prudente" },
+    { padroes: ["vila sonia"], regiao: "vila sonia" },
+    { padroes: ["interlagos"], regiao: "interlagos" },
+    { padroes: ["vila carrao"], regiao: "vila carrao" },
+    { padroes: ["jaguare"], regiao: "jaguare" },
+    { padroes: ["vila formosa"], regiao: "vila formosa" },
+    { padroes: ["paraiso do morumbi", "fonte do morumbi", "parque do morumbi", "portal do morumbi"], regiao: null },
+    { padroes: ["morumbi"], regiao: "morumbi" },
+    { padroes: ["freguesia do o"], regiao: "freguesia do o" },
+    { padroes: ["vila matilde"], regiao: "vila matilde" },
+    { padroes: ["cambuci"], regiao: "cambuci" },
+    { padroes: ["vila andrade"], regiao: "vila andrade" },
+    { padroes: ["sapopemba"], regiao: "sapopemba" },
+    { padroes: ["jabaquara"], regiao: "jabaquara" },
+    { padroes: ["cidade ademar"], regiao: "cidade ademar" },
+    { padroes: ["mandaqui"], regiao: "mandaqui" },
+    { padroes: ["itaquera"], regiao: "itaquera" },
   ],
   // As demais cidades novas ainda não têm sub-região mapeada — caem no
   // valor médio da cidade (quando configurado) até haver dado de bairro.
@@ -222,6 +379,15 @@ function identificarCidade(comarcaUf) {
     if (ufExigida && ufDetectada !== ufExigida) continue; // nome bate, mas UF não confirma — evita colisão
     return cidade;
   }
+
+  // Nenhum nome casou, mas a UF foi detectada com segurança:
+  // - DF só tem uma "cidade" no modelo (Brasília e RAs), então "Registro
+  //   de Imóveis do DF" sem nome de cidade já basta.
+  // - Em SP, os cartórios da capital se identificam como "da Capital"
+  //   (ex: "14º Oficial de Registro de Imóveis da Capital - SP").
+  if (ufDetectada === "df") return "brasilia-df";
+  if (ufDetectada === "sp" && /\bcapital\b/.test(texto)) return "sao-paulo-sp-capital";
+
   return null; // cidade não reconhecida — não inventar, sinalizar
 }
 
@@ -230,6 +396,8 @@ function identificarRegiao(enderecoCompleto, cidade) {
   if (!padroesDaCidade) return null;
   const texto = normalizar(enderecoCompleto);
   for (const { padroes, regiao } of padroesDaCidade) {
+    // regiao: null = homônimo conhecido de propósito sem preço próprio —
+    // para a busca aqui (não deixa cair no padrão genérico errado).
     if (padroes.some((p) => texto.includes(p))) return regiao;
   }
   return null;
@@ -255,11 +423,17 @@ function obterPrecoM2(dadosExtraidos) {
 
   return {
     precoM2: infoRegiao ? infoRegiao.valor : tabelaCidade.valor_medio_fallback,
-    fonte: infoRegiao ? infoRegiao.fonte : "fallback_medio_cidade",
-    regiao,
+    fonte: infoRegiao ? infoRegiao.fonte : (tabelaCidade.fonte_fallback || "fallback_medio_cidade"),
+    amostraN: infoRegiao && Number.isFinite(infoRegiao.n) ? infoRegiao.n : null,
+    regiao: infoRegiao ? regiao : null,
     cidade,
   };
 }
+
+// Fontes de preço consideradas "de referência" (não placeholder). Fora
+// desta lista, a precificação sai mas vai pra revisão manual.
+const FONTES_DE_REFERENCIA = new Set(["estimativa_terceiro", "mediana_anuncios_bairro"]);
+const AMOSTRA_MINIMA_CONFIAVEL = 20;
 
 // ============================================================
 // CAMADA ESTÁVEL — parsing, validação, resposta, auditoria
@@ -275,31 +449,53 @@ function normalizar(texto) {
     .trim();
 }
 
-// Trata os dois formatos possíveis: brasileiro (vírgula decimal, ponto
-// milhar — ex: "40.002,50") e internacional/JSON (ponto decimal — ex:
-// "80.5"). O extract.js não força uma convenção específica nesses campos,
-// então os dois formatos são esperados na prática.
-function parseAreaString(valor) {
-  if (valor === null || valor === undefined) return null;
-  let texto = valor.toString().replace(/m²|m2/gi, "").trim();
-  if (!texto) return null;
+// Lê área vinda da extração. Formatos esperados:
+//   brasileiro: "1.234,56" / "65,32" (vírgula decimal, ponto milhar)
+//   internacional: "65.32" / 65.32 (número JSON)
+// O caso perigoso é "1.200" (um ponto, exatamente 3 dígitos depois): em
+// matrícula brasileira isso é MIL E DUZENTOS, mas um "65.320" pode ser o
+// LLM convertendo "65,320" pra ponto decimal. Antes, "1.200" virava
+// 1,2 m² sem nenhum aviso (bug real: imóvel de 1.200 m² precificado a
+// R$ 15 mil e marcado "OK"). Agora resolve pela plausibilidade e, se a
+// leitura foi ambígua, devolve ambigua=true pra forçar revisão manual.
+const AREA_MIN_PLAUSIVEL = 15;      // m² — abaixo disso, só box/vaga
+const AREA_MAX_PLAUSIVEL = 50000;   // m² — gleba grande; acima é erro
+
+function interpretarArea(valor) {
+  if (valor === null || valor === undefined || valor === "") return { valor: null, ambigua: false };
+  if (typeof valor === "number") {
+    return { valor: Number.isFinite(valor) && valor > 0 ? valor : null, ambigua: false };
+  }
+  let texto = valor.toString().replace(/m²|m2|metros quadrados/gi, "").replace(/\s/g, "").trim();
+  if (!texto) return { valor: null, ambigua: false };
 
   const temVirgula = texto.includes(",");
   const qtdPontos = (texto.match(/\./g) || []).length;
+  const plausivel = (n) => n >= AREA_MIN_PLAUSIVEL && n <= AREA_MAX_PLAUSIVEL;
 
   if (temVirgula) {
-    // Formato brasileiro: ponto é separador de milhar, vírgula é decimal
     texto = texto.replace(/\./g, "").replace(",", ".");
   } else if (qtdPontos > 1) {
-    // Mais de um ponto só faz sentido como separador de milhar
-    // (ex: "1.234.567") — não tem convenção com múltiplos pontos decimais
     texto = texto.replace(/\./g, "");
+  } else if (qtdPontos === 1 && /^\d{1,3}\.\d{3}$/.test(texto)) {
+    // "1.200" ou "65.320": duas leituras possíveis
+    const comoDecimal = parseFloat(texto);
+    const comoMilhar = parseFloat(texto.replace(".", ""));
+    const decOk = plausivel(comoDecimal);
+    const milOk = plausivel(comoMilhar);
+    if (milOk && !decOk) return { valor: comoMilhar, ambigua: false };
+    if (decOk && !milOk) return { valor: comoDecimal, ambigua: false };
+    // As duas plausíveis (ex: "15.000") ou nenhuma: usa a convenção
+    // brasileira (milhar), mas marca como ambígua.
+    return { valor: comoMilhar, ambigua: true };
   }
-  // Um único ponto sem vírgula (ex: "80.5") é tratado como decimal —
-  // mais seguro do que assumir milhar, que exigiria área implausível.
 
   const num = parseFloat(texto);
-  return Number.isFinite(num) && num > 0 ? num : null;
+  return { valor: Number.isFinite(num) && num > 0 ? num : null, ambigua: false };
+}
+
+function parseAreaString(valor) {
+  return interpretarArea(valor).valor;
 }
 
 function calcularAjuste(dados) {
@@ -333,10 +529,10 @@ function confiancaExigeRevisao(confiancaExtracao) {
 async function gravarHistorico(dados, calculo, respostaFinal) {
   if (!sql) {
     console.warn("Nenhuma variável de conexão do banco encontrada — pulando gravação de histórico.");
-    return;
+    return null;
   }
   try {
-    await sql`
+    const linhas = await sql`
       INSERT INTO precificacoes (
         numero_matricula, endereco_completo, cidade_identificada, regiao_identificada,
         area_privativa_m2, area_total_m2, vaga_garagem,
@@ -356,9 +552,12 @@ async function gravarHistorico(dados, calculo, respostaFinal) {
         ${JSON.stringify(dados)}, ${JSON.stringify(respostaFinal)}, ${calculo.tempoTotalMs},
         ${calculo.tipoResposta || "estimativa"}, ${calculo.motivoRecusa || null}, ${calculo.fundamentacaoRecusa || null}
       )
+      RETURNING id
     `;
+    return linhas[0]?.id ?? null;
   } catch (dbErr) {
     console.error("Falha ao gravar histórico (não afeta a resposta):", dbErr.message);
+    return null;
   }
 }
 
@@ -534,14 +733,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ erro: "Corpo da requisição ausente ou inválido." });
     }
 
-    const areaPrivativa = parseAreaString(dados.area_privativa_m2);
-    const areaTotal = parseAreaString(dados.area_total_m2);
+    const leituraPrivativa = interpretarArea(dados.area_privativa_m2);
+    const leituraTotal = interpretarArea(dados.area_total_m2);
+    const areaPrivativa = leituraPrivativa.valor;
+    const areaTotal = leituraTotal.valor;
     const area = areaPrivativa || areaTotal;
     const origemArea = areaPrivativa
       ? "area_privativa_m2"
       : areaTotal
       ? "area_total_m2 (privativa ausente)"
       : null;
+    const areaAmbigua = areaPrivativa ? leituraPrivativa.ambigua : leituraTotal.ambigua;
 
     const calculo = obterPrecoM2(dados);
 
@@ -549,6 +751,7 @@ export default async function handler(req, res) {
     const tempoExtracaoMs = Number.isFinite(Number(dados._tempo_extracao_ms))
       ? Number(dados._tempo_extracao_ms)
       : null;
+    const LIMITE_SLA_MS = 5 * 60 * 1000; // 5 minutos — item 9.5 do Anexo I
 
     if (decisaoRecusa) {
       const tempoPrecificacaoMs = Date.now() - inicioPrecificacao;
@@ -556,6 +759,7 @@ export default async function handler(req, res) {
 
       const respostaRecusa = {
         tipo_resposta: "recusa",
+        id_registro: null,
         motivo_recusa: decisaoRecusa.motivo,
         motivo_descricao: {
           a: "O modelo estatístico não permite a precificação do imóvel",
@@ -564,51 +768,57 @@ export default async function handler(req, res) {
           d: "Não há convicção sobre a efetiva localização do imóvel",
         }[decisaoRecusa.motivo],
         fundamentacao: decisaoRecusa.fundamentacao,
+        cidade_identificada: calculo.cidade,
         modelo: METADADOS_MODELO,
         responsaveis_tecnicos: RESPONSAVEIS_TECNICOS,
         tempo_processamento: {
           extracao_ms: tempoExtracaoMs,
           precificacao_ms: tempoPrecificacaoMs,
           total_ms: tempoTotalMs,
-          dentro_do_sla_5min: tempoTotalMs !== null ? tempoTotalMs <= 5 * 60 * 1000 : null,
+          dentro_do_sla_5min: tempoTotalMs !== null ? tempoTotalMs <= LIMITE_SLA_MS : null,
         },
         timestamp: new Date().toISOString(),
       };
 
-      await gravarHistorico(
+      respostaRecusa.id_registro = await gravarHistorico(
         dados,
         { ...calculo, ajuste: null, tempoTotalMs, tipoResposta: "recusa", motivoRecusa: decisaoRecusa.motivo, fundamentacaoRecusa: decisaoRecusa.fundamentacao },
-        { valor_estimado: null, precisa_revisao_manual: null }
+        respostaRecusa
       );
 
       // HTTP 200: o sistema funcionou corretamente e chegou a uma decisão
-      // válida (recusar). Não é erro de sistema, é resultado de negócio —
-      // por isso não usamos 4xx aqui.
+      // válida (recusar). Não é erro de sistema, é resultado de negócio.
       return res.status(200).json(respostaRecusa);
     }
 
-    const { precoM2, fonte, regiao, cidade } = calculo;
+    const { precoM2, fonte, regiao, cidade, amostraN } = calculo;
     const valorBase = area * precoM2;
     const { ajuste, detalhes } = calcularAjuste(dados);
     const valorEstimado = Math.round(valorBase * ajuste);
 
     const elegibilidade = verificarElegibilidade(dados, cidade, valorEstimado);
 
-    const precisaRevisaoManual =
-      !regiao ||
-      fonte !== "estimativa_terceiro" ||
-      confiancaExigeRevisao(dados.confianca_extracao) ||
-      dados.imovel_pertence_caixa === null ||
-      dados.imovel_pertence_caixa === undefined ||
-      (elegibilidade !== null && !elegibilidade.dentro_do_criterio);
+    // Cada motivo que manda pra revisão manual fica explícito na resposta
+    // (e no relatório) — "precisa revisão" sem dizer por quê não ajuda o
+    // engenheiro que vai revisar.
+    const motivosRevisao = [];
+    if (!regiao) motivosRevisao.push("Bairro/região não reconhecido no endereço — usado o valor médio da cidade.");
+    if (!FONTES_DE_REFERENCIA.has(fonte)) motivosRevisao.push(`Preço/m² de fonte não validada (${fonte}).`);
+    if (amostraN !== null && amostraN < AMOSTRA_MINIMA_CONFIAVEL) motivosRevisao.push(`Amostra pequena no bairro (${amostraN} anúncios; mínimo ${AMOSTRA_MINIMA_CONFIAVEL}).`);
+    if (confiancaExigeRevisao(dados.confianca_extracao)) motivosRevisao.push(`Confiança da extração "${dados.confianca_extracao || "não informada"}".`);
+    if (dados.imovel_pertence_caixa === null || dados.imovel_pertence_caixa === undefined) motivosRevisao.push("Não foi possível determinar se o imóvel pertence à CAIXA.");
+    if (areaAmbigua) motivosRevisao.push(`Área com leitura ambígua (valor extraído: "${areaPrivativa ? dados.area_privativa_m2 : dados.area_total_m2}") — conferir na matrícula.`);
+    if (!areaPrivativa && areaTotal) motivosRevisao.push("Área privativa ausente — usada a área total (em casa/terreno pode ser área do lote, não construída).");
+    if (elegibilidade !== null && !elegibilidade.dentro_do_criterio) motivosRevisao.push("Fora do critério de elegibilidade da cidade: " + elegibilidade.motivos_fora_do_criterio.join("; ") + ".");
 
-    // Tempo de precificação medido aqui no servidor; extração já veio do cliente.
+    const precisaRevisaoManual = motivosRevisao.length > 0;
+
     const tempoPrecificacaoMs = Date.now() - inicioPrecificacao;
     const tempoTotalMs = tempoExtracaoMs !== null ? tempoExtracaoMs + tempoPrecificacaoMs : null;
-    const LIMITE_SLA_MS = 5 * 60 * 1000; // 5 minutos — item 9.5 do Anexo I
 
     const respostaFinal = {
       tipo_resposta: "estimativa",
+      id_registro: null,
       valor_estimado: valorEstimado,
       moeda: "BRL",
       modelo: METADADOS_MODELO,
@@ -616,11 +826,13 @@ export default async function handler(req, res) {
       detalhes_calculo: {
         area_utilizada_m2: area,
         origem_area: origemArea,
+        area_leitura_ambigua: areaAmbigua,
         cidade_identificada: cidade,
         endereco_original: dados.endereco_completo || null,
         regiao_identificada: regiao || "não reconhecida (endereço não bateu com padrões conhecidos)",
         preco_m2_utilizado: precoM2,
         fonte_preco_m2: fonte,
+        amostra_anuncios_regiao: amostraN,
         valor_base: Math.round(valorBase),
         fator_ajuste: ajuste,
         ajustes_aplicados: detalhes,
@@ -631,7 +843,7 @@ export default async function handler(req, res) {
         onus_ativos: dados.onus_ativos || [],
         alertas_extracao: dados.alertas || [],
       },
-      elegibilidade: elegibilidade,
+      elegibilidade,
       tempo_processamento: {
         extracao_ms: tempoExtracaoMs,
         precificacao_ms: tempoPrecificacaoMs,
@@ -639,12 +851,12 @@ export default async function handler(req, res) {
         dentro_do_sla_5min: tempoTotalMs !== null ? tempoTotalMs <= LIMITE_SLA_MS : null,
       },
       precisa_revisao_manual: precisaRevisaoManual,
+      motivos_revisao: motivosRevisao,
+      corrigido_manualmente: dados._corrigido_manualmente === true,
       timestamp: new Date().toISOString(),
     };
 
-    // Grava histórico ANTES de responder, mas sem deixar isso travar a
-    // resposta em caso de erro no banco.
-    await gravarHistorico(
+    respostaFinal.id_registro = await gravarHistorico(
       dados,
       { precoM2, fonte, regiao, cidade, ajuste, tempoTotalMs, tipoResposta: "estimativa" },
       respostaFinal

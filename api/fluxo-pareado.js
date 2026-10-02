@@ -37,6 +37,7 @@ export default async function handler(req, res) {
              valor_real_avaliado, criado_em
       FROM precificacoes
       WHERE valor_real_avaliado IS NOT NULL
+        AND valor_estimado IS NOT NULL -- recusas não têm estimativa; entrariam como -100%
         AND (${cidadeFiltro}::text IS NULL OR cidade_identificada = ${cidadeFiltro})
         AND (${dias}::int IS NULL OR criado_em >= now() - make_interval(days => ${dias}::int))
       ORDER BY criado_em DESC

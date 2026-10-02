@@ -4,10 +4,21 @@
 // SYSTEM_PROMPT e RESPONSE_SCHEMA são a parte de domínio — mantidos como
 // estavam. Mudanças desta revisão são de infraestrutura: segurança,
 // robustez, LGPD, e agora controle de custo (opt-in).
+// Modelo configurável por GEMINI_MODEL (padrão: gemini-3.1-flash-lite).
 
 import { neon } from "@neondatabase/serverless";
 
-const sql = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : null;
+// Mesma cadeia de variáveis dos outros endpoints — antes este arquivo só
+// lia DATABASE_URL, e se a integração Neon criou STORAGE_DATABASE_URL o
+// contador/limite diário ficava desligado sem aviso.
+const CONNECTION_STRING =
+  process.env.STORAGE_DATABASE_URL ||
+  process.env.DATABASE_URL ||
+  process.env.STORAGE_DATABASE_URL_UNPOOLED ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_URL_NON_POOLING;
+
+const sql = CONNECTION_STRING ? neon(CONNECTION_STRING) : null;
 
 // Limite diário de chamadas ao Gemini — OPCIONAL. Se a variável de
 // ambiente LIMITE_DIARIO_GEMINI não for configurada na Vercel, este
@@ -29,6 +40,8 @@ Leia cuidadosamente TODO o histórico de atos, na ordem em que aparecem, antes d
 Só inclua em historico_atos_relevantes os atos que mudam propriedade, criam/cancelam ônus, ou fixam valores (ignore atos puramente administrativos, como averbação de código do imóvel). Limite a 8 itens.
 
 Se um campo não existir no documento, use null ou lista vazia. Nunca invente informação que não esteja no texto.
+
+Áreas (area_privativa_m2, area_total_m2, area_comum_m2): escreva SEMPRE no formato brasileiro, com vírgula decimal e ponto de milhar, copiando o número como aparece no documento (ex: "1.200,00", "65,32"). Não converta para ponto decimal. Sem a unidade.
 
 Critério para confianca_extracao (aplique com rigor — na dúvida entre dois níveis, escolha sempre o mais baixo):
 - "baixa": há texto ilegível, cortado, borrado, páginas faltando, ou informação central (proprietário atual, ônus ativos) ambígua ou conflitante entre trechos do documento.
@@ -183,7 +196,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no servidor' });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`;
+  const modelo = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
   const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey };
 
   try {
