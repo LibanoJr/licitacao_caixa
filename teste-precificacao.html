@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Teste — Pipeline Completo (Extração + Precificação) | CR 12/2026</title>
+<title>Extração e precificação de matrícula | CR 12/2026-5688 CAIXA</title>
 <style>
   :root {
     --bg: #f7f8fa;
@@ -107,16 +107,35 @@
     font-size: 13px; padding: 12px; border-radius: 7px; margin-top: 14px; display: none;
   }
   footer { text-align: center; font-size: 11.5px; color: var(--ink-soft); margin-top: 24px; }
+
+  .linha strong.texto { font-family: inherit; font-weight: 600; }
+  .recusa-box { background: var(--bad-bg); border: 1px solid var(--bad-line); border-radius: 8px; padding: 14px 16px; margin: 6px 0 4px; }
+  .recusa-box .motivo { font-weight: 700; color: var(--bad-ink); font-size: 15px; margin-bottom: 6px; }
+  .recusa-box .fund { font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+  .lista-revisao { font-size: 13px; color: var(--warn-ink); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 7px; padding: 10px 12px 10px 28px; margin: 10px 0 0; line-height: 1.45; }
+  .lista-revisao li { margin-bottom: 4px; }
+  .rt { font-size: 12.5px; color: var(--ink-soft); padding: 4px 0; line-height: 1.45; }
+  .rt b { color: var(--ink); font-weight: 600; }
+  .rt .pendente { color: var(--bad-ink); font-weight: 600; }
+  .acoes { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .acoes a, .acoes button { flex: 1 1 200px; width: auto; text-align: center; text-decoration: none; padding: 11px; border-radius: 7px; font-size: 14px; font-weight: 600; margin: 0; }
+  .btn-sec { background: #fff; color: var(--accent); border: 1px solid var(--accent); cursor: pointer; }
+  .btn-sec:hover { background: var(--accent-soft); }
+  #painel-correcao { display: none; }
+  #painel-correcao p { font-size: 13px; color: var(--ink-soft); margin: 0 0 14px; line-height: 1.5; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
+  textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="eyebrow">MVP interno · pipeline completo</div>
-  <h1>Teste — Extração + Precificação</h1>
+  <div class="eyebrow">MVP · CR 12/2026-5688 CAIXA (GEHPA)</div>
+  <h1>Extração e precificação de matrícula</h1>
   <p class="subtitle">
-    Envia a Certidão de Inteiro Teor em PDF, chama <code>/api/extract</code> (Gemini)
-    e em seguida <code>/api/price</code> automaticamente com o resultado. Testa o
-    fluxo real de ponta a ponta, sem terminal.
+    Envie a Certidão de Inteiro Teor em PDF. O sistema lê a matrícula, calcula o valor
+    estimado ou recusa a ordem de serviço com fundamentação (item 9.5), e gera o relatório em PDF.
   </p>
 
   <div class="panel">
@@ -125,43 +144,71 @@
       <input type="file" id="arquivo" accept="application/pdf">
     </div>
     <div class="field">
-      <label for="chave">Chave de acesso (só se APP_ACCESS_KEY estiver configurada)</label>
-      <input type="password" id="chave" placeholder="Deixe em branco se não souber">
+      <label for="chave">Chave de acesso da extração</label>
+      <input type="password" id="chave" placeholder="Informada junto com o login" autocomplete="off">
     </div>
     <button id="btn-processar">Processar documento</button>
-    <div class="erro-box" id="erro-box"></div>
+    <div class="erro-box" id="erro-box" role="alert"></div>
   </div>
 
-  <div class="panel" id="painel-progresso">
-    <div class="step" id="step-extract"><div class="dot"></div><span>Extraindo dados do PDF (Gemini)...</span></div>
-    <div class="step" id="step-price"><div class="dot"></div><span>Calculando valor estimado...</span></div>
+  <div class="panel" id="painel-progresso" aria-live="polite">
+    <div class="step" id="step-extract"><div class="dot"></div><span>Lendo a matrícula</span></div>
+    <div class="step" id="step-price"><div class="dot"></div><span>Calculando o valor</span></div>
   </div>
 
-  <div class="panel" id="painel-resultado">
-    <div class="valor-label">Valor estimado</div>
-    <div class="valor-principal" id="valor-principal">—</div>
+  <div class="panel" id="painel-resultado" aria-live="polite">
+    <div id="bloco-estimativa">
+      <div class="valor-label">Valor estimado</div>
+      <div class="valor-principal" id="valor-principal">—</div>
+    </div>
+    <div id="bloco-recusa" style="display:none;">
+      <div class="valor-label">Ordem de serviço recusada · item 9.5</div>
+      <div class="recusa-box">
+        <div class="motivo" id="recusa-motivo"></div>
+        <div class="fund" id="recusa-fund"></div>
+      </div>
+    </div>
     <div id="badges-topo"></div>
+    <ul class="lista-revisao" id="lista-revisao" style="display:none;"></ul>
 
-    <div class="secao-titulo">Cálculo</div>
-    <div class="linha"><span>Área utilizada</span><strong id="d-area">—</strong></div>
-    <div class="linha"><span>Endereço extraído</span><strong id="d-endereco">—</strong></div>
-    <div class="linha"><span>Região identificada</span><strong id="d-regiao">—</strong></div>
-    <div class="linha"><span>Preço/m² utilizado</span><strong id="d-precom2">—</strong></div>
-    <div class="linha"><span>Fonte do preço/m²</span><strong id="d-fonte">—</strong></div>
-    <div class="linha"><span>Fator de ajuste</span><strong id="d-ajuste">—</strong></div>
+    <div id="secao-calculo">
+      <div class="secao-titulo">Cálculo</div>
+      <div class="linha"><span>Área utilizada</span><strong id="d-area">—</strong></div>
+      <div class="linha"><span>Endereço extraído</span><strong class="texto" id="d-endereco">—</strong></div>
+      <div class="linha"><span>Cidade</span><strong id="d-cidade">—</strong></div>
+      <div class="linha"><span>Bairro/região</span><strong id="d-regiao">—</strong></div>
+      <div class="linha"><span>Preço/m²</span><strong id="d-precom2">—</strong></div>
+      <div class="linha"><span>Fonte do preço/m²</span><strong id="d-fonte">—</strong></div>
+      <div class="linha"><span>Fator de ajuste</span><strong id="d-ajuste">—</strong></div>
+    </div>
 
-    <div class="secao-titulo">SLA (item 9.5 do edital — meta: até 5 minutos)</div>
-    <div class="linha"><span>Tempo de extração (Gemini)</span><strong id="d-tempo-extracao">—</strong></div>
-    <div class="linha"><span>Tempo de precificação</span><strong id="d-tempo-precificacao">—</strong></div>
-    <div class="linha"><span>Tempo total (ponta a ponta)</span><strong id="d-tempo-total">—</strong></div>
+    <div id="secao-elegibilidade" style="display:none;">
+      <div class="secao-titulo">Elegibilidade da cidade</div>
+      <div class="linha"><span>Critério</span><strong class="texto" id="d-eleg-fonte">—</strong></div>
+      <div class="linha"><span>Situação</span><strong class="texto" id="d-eleg-status">—</strong></div>
+    </div>
+
+    <div class="secao-titulo">Tempo de atendimento (meta do item 9.5: 5 minutos)</div>
+    <div class="linha"><span>Leitura da matrícula</span><strong id="d-tempo-extracao">—</strong></div>
+    <div class="linha"><span>Precificação</span><strong id="d-tempo-precificacao">—</strong></div>
+    <div class="linha"><span>Total</span><strong id="d-tempo-total">—</strong></div>
     <div id="badge-sla"></div>
 
     <div class="secao-titulo">Contexto da extração</div>
+    <div class="linha"><span>Matrícula</span><strong id="d-matricula">—</strong></div>
     <div class="linha"><span>Confiança da extração</span><strong id="d-confianca">—</strong></div>
     <div class="linha"><span>Pertence à CAIXA</span><strong id="d-pertence">—</strong></div>
-    <div class="linha"><span>Ônus ativos</span><strong id="d-onus">—</strong></div>
-
+    <div class="linha"><span>Ônus ativos</span><strong class="texto" id="d-onus">—</strong></div>
     <ul class="lista-alertas" id="lista-alertas" style="display:none;"></ul>
+
+    <div class="secao-titulo">Responsáveis técnicos e modelo</div>
+    <div id="lista-rts"></div>
+    <div class="rt" id="d-modelo"></div>
+
+    <div class="acoes">
+      <a class="btn-sec" id="link-pdf" href="#" target="_blank" rel="noopener" style="display:none;">Abrir relatório em PDF</a>
+      <button class="btn-sec" id="btn-abrir-correcao" type="button">Corrigir dados e recalcular</button>
+    </div>
 
     <details>
       <summary>Ver JSON completo (extração + cálculo)</summary>
@@ -169,24 +216,40 @@
     </details>
   </div>
 
-  <footer>Chama <code>/api/extract</code> e <code>/api/price</code> na sequência, no seu próprio deploy Vercel.</footer>
+  <div class="panel" id="painel-correcao">
+    <h2 style="font-size:16px;margin:0 0 6px;">Corrigir dados extraídos</h2>
+    <p>Confira os campos com a matrícula. O novo cálculo fica registrado no histórico como corrigido manualmente, separado da leitura automática.</p>
+    <div class="field"><label for="c-comarca">Comarca / cartório (com UF)</label><input type="text" id="c-comarca"></div>
+    <div class="field"><label for="c-endereco">Endereço completo (com bairro)</label><textarea id="c-endereco" rows="2"></textarea></div>
+    <div class="grid2">
+      <div class="field"><label for="c-tipo">Tipo de imóvel</label><input type="text" id="c-tipo"></div>
+      <div class="field"><label for="c-matricula">Nº da matrícula</label><input type="text" id="c-matricula"></div>
+      <div class="field"><label for="c-area-priv">Área privativa (m²)</label><input type="text" id="c-area-priv" inputmode="decimal" placeholder="ex: 65,32"></div>
+      <div class="field"><label for="c-area-total">Área total (m²)</label><input type="text" id="c-area-total" inputmode="decimal" placeholder="ex: 1.200,00"></div>
+    </div>
+    <button id="btn-recalcular" type="button">Recalcular com os dados corrigidos</button>
+    <div class="erro-box" id="erro-correcao" role="alert"></div>
+  </div>
+
+  <footer>Leitura via <code>/api/extract</code> · cálculo via <code>/api/price</code> · relatório via <code>/api/relatorio-pdf</code></footer>
 </div>
 
 <script>
-const btn = document.getElementById('btn-processar');
-const arquivoInput = document.getElementById('arquivo');
-const chaveInput = document.getElementById('chave');
-const erroBox = document.getElementById('erro-box');
-const painelProgresso = document.getElementById('painel-progresso');
-const painelResultado = document.getElementById('painel-resultado');
-const stepExtract = document.getElementById('step-extract');
-const stepPrice = document.getElementById('step-price');
+const $ = (id) => document.getElementById(id);
+const btn = $('btn-processar');
+const LIMITE_SLA_MS = 5 * 60 * 1000;
 
-const fmtBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+let ultimaExtracao = null;     // dados extraídos da última leitura (base pra correção)
+let ultimoTempoExtracao = null;
+
+const fmtBRL = (v) => (v === null || v === undefined || Number.isNaN(Number(v)))
+  ? '—'
+  : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+const seg = (ms) => (ms === null || ms === undefined) ? '—' : `${(ms / 1000).toFixed(1)} s`;
 
 function marcarStep(el, estado) {
   el.classList.remove('ativo', 'ok', 'erro');
-  if (estado) el.classList.add(estado); // '' é usado de propósito pra "resetar" — classList.add('') lança erro no navegador
+  if (estado) el.classList.add(estado);
 }
 
 function fileToBase64(file) {
@@ -198,155 +261,236 @@ function fileToBase64(file) {
   });
 }
 
-function badgeConfianca(nivel) {
-  if (nivel === 'alta') return '<span class="badge ok">CONFIANÇA ALTA</span>';
-  if (nivel === 'media') return '<span class="badge warn">CONFIANÇA MÉDIA</span>';
-  if (nivel === 'baixa') return '<span class="badge bad">CONFIANÇA BAIXA</span>';
-  return '<span class="badge neutral">CONFIANÇA NÃO INFORMADA</span>';
+function badge(texto, tipo) {
+  const s = document.createElement('span');
+  s.className = 'badge ' + tipo;
+  s.textContent = texto;
+  return s;
+}
+
+function preencherLista(el, itens, prefixo) {
+  el.replaceChildren();
+  if (!itens || !itens.length) { el.style.display = 'none'; return; }
+  for (const t of itens) {
+    const li = document.createElement('li');
+    li.textContent = (prefixo || '') + t;   // textContent: texto da matrícula nunca vira HTML
+    el.appendChild(li);
+  }
+  el.style.display = 'block';
+}
+
+function lerJsonSeguro(resp) {
+  return resp.text().then((t) => {
+    try { return JSON.parse(t); }
+    catch { return { erro: `Resposta inesperada do servidor (HTTP ${resp.status}).` }; }
+  });
+}
+
+async function precificar(dados, tempoExtracaoMs) {
+  const t0 = performance.now();
+  const resp = await fetch('/api/price', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...dados, _tempo_extracao_ms: tempoExtracaoMs }),
+  });
+  const json = await lerJsonSeguro(resp);
+  if (!resp.ok) throw new Error(json.erro || json.error || 'Erro ao calcular a precificação.');
+  return { json, tempoPrecificacaoMs: Math.round(performance.now() - t0) };
+}
+
+function renderizar(ext, prec, tempos) {
+  const recusa = prec.tipo_resposta === 'recusa';
+  $('bloco-estimativa').style.display = recusa ? 'none' : 'block';
+  $('bloco-recusa').style.display = recusa ? 'block' : 'none';
+  $('secao-calculo').style.display = recusa ? 'none' : 'block';
+
+  const badges = $('badges-topo');
+  badges.replaceChildren();
+  const conf = ext.confianca_extracao;
+  badges.appendChild(conf === 'alta' ? badge('CONFIANÇA ALTA', 'ok')
+    : conf === 'media' ? badge('CONFIANÇA MÉDIA', 'warn')
+    : conf === 'baixa' ? badge('CONFIANÇA BAIXA', 'bad')
+    : badge('CONFIANÇA NÃO INFORMADA', 'neutral'));
+  if (prec.corrigido_manualmente) badges.appendChild(badge('CORRIGIDO MANUALMENTE', 'neutral'));
+
+  if (recusa) {
+    $('recusa-motivo').textContent = `Motivo (${prec.motivo_recusa}): ${prec.motivo_descricao}`;
+    $('recusa-fund').textContent = prec.fundamentacao;
+    badges.appendChild(badge('RECUSADA', 'bad'));
+    preencherLista($('lista-revisao'), []);
+  } else {
+    $('valor-principal').textContent = fmtBRL(prec.valor_estimado);
+    badges.appendChild(prec.precisa_revisao_manual ? badge('PRECISA REVISÃO MANUAL', 'warn') : badge('SEM PENDÊNCIA', 'ok'));
+    preencherLista($('lista-revisao'), prec.motivos_revisao);
+
+    const dc = prec.detalhes_calculo || {};
+    $('d-area').textContent = `${dc.area_utilizada_m2} m² (${dc.origem_area})`;
+    $('d-endereco').textContent = dc.endereco_original || '—';
+    $('d-cidade').textContent = dc.cidade_identificada || '—';
+    $('d-regiao').textContent = dc.regiao_identificada || '—';
+    $('d-precom2').textContent = fmtBRL(dc.preco_m2_utilizado) + '/m²';
+    $('d-fonte').textContent = dc.fonte_preco_m2 + (dc.amostra_anuncios_regiao ? ` (${dc.amostra_anuncios_regiao} anúncios)` : '');
+    $('d-ajuste').textContent = `×${Number(dc.fator_ajuste).toFixed(3)}`;
+  }
+  if (ext.imovel_pertence_caixa === true) badges.appendChild(badge('IMÓVEL DA CAIXA', 'neutral'));
+
+  const eleg = prec.elegibilidade;
+  $('secao-elegibilidade').style.display = eleg ? 'block' : 'none';
+  if (eleg) {
+    $('d-eleg-fonte').textContent = eleg.fonte_criterio;
+    $('d-eleg-status').textContent = eleg.dentro_do_criterio
+      ? 'Dentro do critério'
+      : 'Fora do critério: ' + eleg.motivos_fora_do_criterio.join('; ');
+  }
+
+  $('d-tempo-extracao').textContent = seg(tempos.extracao);
+  $('d-tempo-precificacao').textContent = seg(tempos.precificacao);
+  $('d-tempo-total').textContent = seg(tempos.total);
+  const slaBox = $('badge-sla');
+  slaBox.replaceChildren();
+  if (tempos.total !== null) {
+    slaBox.appendChild(tempos.total <= LIMITE_SLA_MS
+      ? badge(`DENTRO DO PRAZO (${seg(tempos.total)} de 300 s)`, 'ok')
+      : badge(`FORA DO PRAZO (${seg(tempos.total)}; limite 300 s)`, 'bad'));
+  }
+
+  $('d-matricula').textContent = ext.numero_matricula || '—';
+  $('d-confianca').textContent = ext.confianca_extracao || '—';
+  $('d-pertence').textContent = ext.imovel_pertence_caixa === true ? 'Sim'
+    : ext.imovel_pertence_caixa === false ? 'Não' : 'Não determinado';
+  $('d-onus').textContent = (ext.onus_ativos && ext.onus_ativos.length) ? ext.onus_ativos.join('; ') : 'Nenhum identificado';
+  preencherLista($('lista-alertas'), ext.alertas, '⚠ ');
+
+  const rts = $('lista-rts');
+  rts.replaceChildren();
+  for (const r of Object.values(prec.responsaveis_tecnicos || {})) {
+    const div = document.createElement('div');
+    div.className = 'rt';
+    const b = document.createElement('b');
+    b.textContent = r.funcao + ': ';
+    const nome = document.createElement('span');
+    nome.textContent = r.nome + (r.registro_profissional ? ` (${r.registro_profissional})` : '');
+    if (String(r.nome).startsWith('PENDENTE')) nome.className = 'pendente';
+    div.append(b, nome);
+    rts.appendChild(div);
+  }
+  const m = prec.modelo || {};
+  $('d-modelo').textContent = `Modelo ${m.versao || '—'} (${m.data_atualizacao || '—'}), ${m.tipo_modelo || ''}`;
+
+  const linkPdf = $('link-pdf');
+  if (prec.id_registro) {
+    linkPdf.href = `/api/relatorio-pdf?id=${encodeURIComponent(prec.id_registro)}`;
+    linkPdf.style.display = '';
+  } else {
+    linkPdf.style.display = 'none';  // sem banco configurado não há registro pra gerar PDF
+  }
+
+  $('json-bruto').textContent = JSON.stringify({ extracao: ext, precificacao: prec }, null, 2);
+  $('painel-resultado').style.display = 'block';
 }
 
 btn.addEventListener('click', async () => {
-  console.log('[DEBUG 0] Botão clicado.');
+  const erroBox = $('erro-box');
   erroBox.style.display = 'none';
-  painelResultado.style.display = 'none';
+  $('painel-resultado').style.display = 'none';
+  $('painel-correcao').style.display = 'none';
 
-  const arquivo = arquivoInput.files[0];
-  console.log('[DEBUG 0.5] Arquivo selecionado:', arquivo ? `${arquivo.name} (${(arquivo.size / 1024 / 1024).toFixed(2)} MB)` : 'NENHUM');
+  const arquivo = $('arquivo').files[0];
   if (!arquivo) {
-    erroBox.style.display = 'block';
     erroBox.textContent = 'Selecione um arquivo PDF primeiro.';
+    erroBox.style.display = 'block';
     return;
   }
 
   btn.disabled = true;
-  btn.textContent = 'Processando...';
-  painelProgresso.style.display = 'block';
-  marcarStep(stepExtract, 'ativo');
-  marcarStep(stepPrice, '');
+  btn.textContent = 'Processando…';
+  $('painel-progresso').style.display = 'block';
+  marcarStep($('step-extract'), 'ativo');
+  marcarStep($('step-price'), '');
 
   try {
-    console.log('[DEBUG 1] Clique registrado, iniciando processamento...');
-    const t0 = performance.now(); // início real do processamento (SLA conta a partir daqui)
+    const t0 = performance.now();
     const fileBase64 = await fileToBase64(arquivo);
-    console.log('[DEBUG 2] Arquivo convertido pra base64, tamanho:', fileBase64.length, 'caracteres');
 
-    const headersExtract = { 'Content-Type': 'application/json' };
-    if (chaveInput.value.trim()) headersExtract['x-app-key'] = chaveInput.value.trim();
+    const headers = { 'Content-Type': 'application/json' };
+    const chave = $('chave').value.trim();
+    if (chave) headers['x-app-key'] = chave;
 
-    console.log('[DEBUG 3] Prestes a chamar /api/extract...');
-    const respExtract = await fetch('/api/extract', {
-      method: 'POST',
-      headers: headersExtract,
-      body: JSON.stringify({ fileBase64 }),
-    });
-    console.log('[DEBUG 4] /api/extract respondeu, status:', respExtract.status);
-    const dadosExtraidos = await respExtract.json();
-    console.log('[DEBUG 5] JSON da extração lido com sucesso');
-    const t1 = performance.now(); // extração concluída
-
+    const respExtract = await fetch('/api/extract', { method: 'POST', headers, body: JSON.stringify({ fileBase64 }) });
+    const ext = await lerJsonSeguro(respExtract);
     if (!respExtract.ok) {
-      marcarStep(stepExtract, 'erro');
-      throw new Error(dadosExtraidos.error || 'Erro na extração (verifique a chave de acesso ou tente novamente).');
+      marcarStep($('step-extract'), 'erro');
+      throw new Error(ext.error || ext.erro || 'Erro na leitura da matrícula. Confira a chave de acesso e tente de novo.');
     }
-    marcarStep(stepExtract, 'ok');
-    marcarStep(stepPrice, 'ativo');
-    console.log('[DEBUG 6] Extração marcada como OK, prestes a chamar /api/price...');
+    const tempoExtracaoMs = Math.round(performance.now() - t0);
+    marcarStep($('step-extract'), 'ok');
+    marcarStep($('step-price'), 'ativo');
 
-    // Envia os dados extraídos + os tempos medidos até aqui, pra ficarem
-    // registrados no histórico junto com o resultado (SLA real, não estimado).
-    const payloadPrice = {
-      ...dadosExtraidos,
-      _tempo_extracao_ms: Math.round(t1 - t0),
-    };
-    console.log('[DEBUG 7] Payload pra /api/price montado, chamando agora...');
+    const { json: prec, tempoPrecificacaoMs } = await precificar(ext, tempoExtracaoMs);
+    marcarStep($('step-price'), 'ok');
 
-    const respPrice = await fetch('/api/price', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payloadPrice),
+    ultimaExtracao = ext;
+    ultimoTempoExtracao = tempoExtracaoMs;
+    renderizar(ext, prec, {
+      extracao: tempoExtracaoMs,
+      precificacao: tempoPrecificacaoMs,
+      total: Math.round(performance.now() - t0),
     });
-    console.log('[DEBUG 8] /api/price respondeu, status:', respPrice.status);
-    const dadosPrecificacao = await respPrice.json();
-    console.log('[DEBUG 9] JSON da precificação lido com sucesso');
-    const t2 = performance.now(); // precificação concluída — fim do SLA
-
-    if (!respPrice.ok) {
-      marcarStep(stepPrice, 'erro');
-      throw new Error(dadosPrecificacao.erro || 'Erro ao calcular precificação.');
-    }
-    marcarStep(stepPrice, 'ok');
-    console.log('[DEBUG 10] Tudo certo, renderizando resultado.');
-
-    const tempoExtracaoMs = Math.round(t1 - t0);
-    const tempoPrecificacaoMs = Math.round(t2 - t1);
-    const tempoTotalMs = Math.round(t2 - t0);
-    const LIMITE_SLA_MS = 5 * 60 * 1000; // 5 minutos, item 9.5 do Anexo I
-
-
-    // Renderiza resultado
-    document.getElementById('valor-principal').textContent = fmtBRL(dadosPrecificacao.valor_estimado);
-
-    const badgesTopo = document.getElementById('badges-topo');
-    let badgesHtml = badgeConfianca(dadosExtraidos.confianca_extracao);
-    if (dadosPrecificacao.precisa_revisao_manual) {
-      badgesHtml += '<span class="badge warn">PRECISA REVISÃO MANUAL</span>';
-    } else {
-      badgesHtml += '<span class="badge ok">OK — SEM PENDÊNCIA</span>';
-    }
-    if (dadosExtraidos.imovel_pertence_caixa === true) {
-      badgesHtml += '<span class="badge neutral">IMÓVEL DA CAIXA</span>';
-    }
-    badgesTopo.innerHTML = badgesHtml;
-
-    const dc = dadosPrecificacao.detalhes_calculo;
-    document.getElementById('d-area').textContent = `${dc.area_utilizada_m2} m² (${dc.origem_area})`;
-    document.getElementById('d-endereco').textContent = dc.endereco_original || '—';
-    document.getElementById('d-regiao').textContent = dc.regiao_identificada;
-    document.getElementById('d-precom2').textContent = fmtBRL(dc.preco_m2_utilizado) + '/m²';
-    document.getElementById('d-fonte').textContent = dc.fonte_preco_m2;
-    document.getElementById('d-ajuste').textContent = `×${dc.fator_ajuste.toFixed(3)}`;
-
-    document.getElementById('d-confianca').textContent = dadosExtraidos.confianca_extracao || '—';
-    document.getElementById('d-pertence').textContent =
-      dadosExtraidos.imovel_pertence_caixa === true ? 'Sim' :
-      dadosExtraidos.imovel_pertence_caixa === false ? 'Não' : 'Não determinado';
-    document.getElementById('d-onus').textContent =
-      (dadosExtraidos.onus_ativos && dadosExtraidos.onus_ativos.length)
-        ? dadosExtraidos.onus_ativos.join('; ')
-        : 'Nenhum identificado';
-
-    // SLA — item 9.5 do edital exige atendimento em até 5 minutos
-    document.getElementById('d-tempo-extracao').textContent = `${(tempoExtracaoMs / 1000).toFixed(1)}s`;
-    document.getElementById('d-tempo-precificacao').textContent = `${(tempoPrecificacaoMs / 1000).toFixed(1)}s`;
-    document.getElementById('d-tempo-total').textContent = `${(tempoTotalMs / 1000).toFixed(1)}s`;
-    const badgeSla = document.getElementById('badge-sla');
-    if (tempoTotalMs <= LIMITE_SLA_MS) {
-      badgeSla.innerHTML = `<span class="badge ok">✓ DENTRO DO SLA (${(tempoTotalMs / 1000).toFixed(1)}s de 300s permitidos)</span>`;
-    } else {
-      badgeSla.innerHTML = `<span class="badge bad">✗ FORA DO SLA — levou ${(tempoTotalMs / 1000).toFixed(1)}s, limite é 300s</span>`;
-    }
-
-    const listaAlertas = document.getElementById('lista-alertas');
-    if (dadosExtraidos.alertas && dadosExtraidos.alertas.length) {
-      listaAlertas.style.display = 'block';
-      listaAlertas.innerHTML = dadosExtraidos.alertas.map(a => `<li>⚠ ${a}</li>`).join('');
-    } else {
-      listaAlertas.style.display = 'none';
-    }
-
-    document.getElementById('json-bruto').textContent = JSON.stringify(
-      { extracao: dadosExtraidos, precificacao: dadosPrecificacao }, null, 2
-    );
-
-    painelResultado.style.display = 'block';
   } catch (err) {
-    console.error('[DEBUG ERRO] Exceção capturada:', err);
-    erroBox.style.display = 'block';
+    if (!$('step-extract').classList.contains('erro')) marcarStep($('step-price'), 'erro');
     erroBox.textContent = 'Erro: ' + err.message;
+    erroBox.style.display = 'block';
   } finally {
-    console.log('[DEBUG FIM] Bloco finally executado — processamento encerrado (com ou sem sucesso).');
     btn.disabled = false;
     btn.textContent = 'Processar documento';
+  }
+});
+
+$('btn-abrir-correcao').addEventListener('click', () => {
+  if (!ultimaExtracao) return;
+  const e = ultimaExtracao;
+  $('c-comarca').value = e.comarca_uf || '';
+  $('c-endereco').value = e.endereco_completo || '';
+  $('c-tipo').value = e.tipo_imovel || '';
+  $('c-matricula').value = e.numero_matricula || '';
+  $('c-area-priv').value = e.area_privativa_m2 ?? '';
+  $('c-area-total').value = e.area_total_m2 ?? '';
+  $('painel-correcao').style.display = 'block';
+  $('painel-correcao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('c-comarca').focus({ preventScroll: true });
+});
+
+$('btn-recalcular').addEventListener('click', async () => {
+  const erroBox = $('erro-correcao');
+  erroBox.style.display = 'none';
+  const b = $('btn-recalcular');
+  b.disabled = true;
+  b.textContent = 'Recalculando…';
+  try {
+    const corrigido = {
+      ...ultimaExtracao,
+      comarca_uf: $('c-comarca').value.trim() || null,
+      endereco_completo: $('c-endereco').value.trim() || null,
+      tipo_imovel: $('c-tipo').value.trim() || null,
+      numero_matricula: $('c-matricula').value.trim() || null,
+      area_privativa_m2: $('c-area-priv').value.trim() || null,
+      area_total_m2: $('c-area-total').value.trim() || null,
+      _corrigido_manualmente: true,
+      _extracao_original: ultimaExtracao,
+    };
+    const { json: prec, tempoPrecificacaoMs } = await precificar(corrigido, ultimoTempoExtracao);
+    renderizar(corrigido, prec, {
+      extracao: ultimoTempoExtracao,
+      precificacao: tempoPrecificacaoMs,
+      total: prec.tempo_processamento ? prec.tempo_processamento.total_ms : null,
+    });
+    $('painel-resultado').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    erroBox.textContent = 'Erro: ' + err.message;
+    erroBox.style.display = 'block';
+  } finally {
+    b.disabled = false;
+    b.textContent = 'Recalcular com os dados corrigidos';
   }
 });
 </script>

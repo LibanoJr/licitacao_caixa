@@ -21,8 +21,12 @@ export default function middleware(request) {
   const authHeader = request.headers.get("authorization");
 
   if (authHeader) {
-    const basicAuth = authHeader.split(" ")[1];
-    const decodificado = atob(basicAuth);
+    let decodificado = "";
+    try {
+      decodificado = atob(authHeader.split(" ")[1] || "");
+    } catch {
+      decodificado = ""; // header malformado: trata como sem credencial (401), não 500
+    }
     // Não usar split(":") com desestruturação — se a senha tiver ":" nela
     // (bem provável numa senha forte), corta errado e perde parte da senha.
     // Só o PRIMEIRO ":" separa usuário de senha; o resto pertence à senha.
