@@ -174,6 +174,8 @@
     <div id="secao-calculo">
       <div class="secao-titulo">Cálculo</div>
       <div class="linha"><span>Área utilizada</span><strong id="d-area">—</strong></div>
+      <div class="linha"><span>Áreas na matrícula</span><strong class="texto" id="d-areas">—</strong></div>
+      <div class="linha"><span>Trecho de onde saiu a área</span><strong class="texto" id="d-trecho">—</strong></div>
       <div class="linha"><span>Endereço extraído</span><strong class="texto" id="d-endereco">—</strong></div>
       <div class="linha"><span>Cidade</span><strong id="d-cidade">—</strong></div>
       <div class="linha"><span>Bairro/região</span><strong id="d-regiao">—</strong></div>
@@ -224,8 +226,10 @@
     <div class="grid2">
       <div class="field"><label for="c-tipo">Tipo de imóvel</label><input type="text" id="c-tipo"></div>
       <div class="field"><label for="c-matricula">Nº da matrícula</label><input type="text" id="c-matricula"></div>
-      <div class="field"><label for="c-area-priv">Área privativa (m²)</label><input type="text" id="c-area-priv" inputmode="decimal" placeholder="ex: 65,32"></div>
-      <div class="field"><label for="c-area-total">Área total (m²)</label><input type="text" id="c-area-total" inputmode="decimal" placeholder="ex: 1.200,00"></div>
+      <div class="field"><label for="c-area-priv">Área privativa / útil (m²)</label><input type="text" id="c-area-priv" inputmode="decimal" placeholder="ex: 65,32"></div>
+      <div class="field"><label for="c-area-total">Área total da unidade (m²)</label><input type="text" id="c-area-total" inputmode="decimal" placeholder="ex: 109,65"></div>
+      <div class="field"><label for="c-area-constr">Área construída, em casa (m²)</label><input type="text" id="c-area-constr" inputmode="decimal" placeholder="ex: 142,30"></div>
+      <div class="field"><label for="c-area-terreno">Área do terreno (m²)</label><input type="text" id="c-area-terreno" inputmode="decimal" placeholder="não entra no cálculo"></div>
     </div>
     <button id="btn-recalcular" type="button">Recalcular com os dados corrigidos</button>
     <div class="erro-box" id="erro-correcao" role="alert"></div>
@@ -325,6 +329,10 @@ function renderizar(ext, prec, tempos) {
 
     const dc = prec.detalhes_calculo || {};
     $('d-area').textContent = `${dc.area_utilizada_m2} m² (${dc.origem_area})`;
+    const ae = dc.areas_extraidas || {};
+    const fmtA = (v) => (v === null || v === undefined) ? '—' : `${String(v).replace('.', ',')} m²`;
+    $('d-areas').textContent = `privativa ${fmtA(ae.privativa)} · construída ${fmtA(ae.construida)} · total ${fmtA(ae.total)} · terreno ${fmtA(ae.terreno)}`;
+    $('d-trecho').textContent = dc.area_trecho_fonte ? `"${dc.area_trecho_fonte}"` : 'não informado pela extração';
     $('d-endereco').textContent = dc.endereco_original || '—';
     $('d-cidade').textContent = dc.cidade_identificada || '—';
     $('d-regiao').textContent = dc.regiao_identificada || '—';
@@ -455,6 +463,8 @@ $('btn-abrir-correcao').addEventListener('click', () => {
   $('c-matricula').value = e.numero_matricula || '';
   $('c-area-priv').value = e.area_privativa_m2 ?? '';
   $('c-area-total').value = e.area_total_m2 ?? '';
+  $('c-area-constr').value = e.area_construida_m2 ?? '';
+  $('c-area-terreno').value = e.area_terreno_m2 ?? '';
   $('painel-correcao').style.display = 'block';
   $('painel-correcao').scrollIntoView({ behavior: 'smooth', block: 'start' });
   $('c-comarca').focus({ preventScroll: true });
@@ -475,6 +485,8 @@ $('btn-recalcular').addEventListener('click', async () => {
       numero_matricula: $('c-matricula').value.trim() || null,
       area_privativa_m2: $('c-area-priv').value.trim() || null,
       area_total_m2: $('c-area-total').value.trim() || null,
+      area_construida_m2: $('c-area-constr').value.trim() || null,
+      area_terreno_m2: $('c-area-terreno').value.trim() || null,
       _corrigido_manualmente: true,
       _extracao_original: ultimaExtracao,
     };

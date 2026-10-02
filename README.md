@@ -58,6 +58,7 @@ Valor = área × preço/m² de referência da região × fatores de ajuste fixos
 
 ## Histórico de versões do modelo
 
+- **1.1.1-baseline (02/10/2026)**: prompt de extração define cada tipo de área (privativa/útil, comum, total da unidade, construída, terreno) e pede o trecho de onde a área foi lida; casas usam área construída; área do terreno nunca é base do cálculo; tela mostra todas as áreas extraídas.
 - **1.1.0-baseline (02/10/2026)**: São Paulo por bairro (antes toda matrícula de SP era recusada); leitura de área com separador de milhar ("1.200" era lido como 1,2 m²); cidade pelo cartório quando só há a UF ("do DF", "da Capital - SP"); motivos de revisão explícitos; recusa exibida na tela (antes quebrava a página); correção manual com recálculo; PDF com quebra de linha, recusa, motivos e RTs; RTs por variável de ambiente; fluxo pareado ignora recusas; dependências com versão fixa.
 - **1.0.0-baseline (24/08/2026)**: versão inicial.
 
