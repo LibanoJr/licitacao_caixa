@@ -25,7 +25,9 @@ export const config = {
 //     que continua valendo junto com a lista.
 function carregarUsuarios() {
   const usuarios = new Map();
-  for (const item of (process.env.BASIC_AUTH_USERS || "").split(",")) {
+  // Tolera o valor colado entre aspas e quebras de linha no lugar de vírgula.
+  const bruto = (process.env.BASIC_AUTH_USERS || "").trim().replace(/^["']|["']$/g, "");
+  for (const item of bruto.split(/[,\n]/)) {
     const i = item.indexOf(":");
     if (i <= 0) continue;
     const usuario = item.slice(0, i).trim();
@@ -66,11 +68,25 @@ export default function middleware(request) {
     }
   }
 
-  // Sem autenticação válida: navegador mostra a caixinha de login nativa
-  return new Response("Autenticação necessária", {
+  // Sem autenticação válida: navegador mostra a caixinha de login nativa.
+  // O texto abaixo aparece se a pessoa clicar em "Cancelar" — traz só um
+  // diagnóstico sem dado sensível (versão do login e QUANTOS usuários
+  // foram carregados; nunca nomes ou senhas), pra conferir se o deploy e
+  // as variáveis de ambiente estão valendo.
+  const total = carregarUsuarios().size;
+  const temLista = Boolean(process.env.BASIC_AUTH_USERS);
+  const temAntigo = Boolean(process.env.BASIC_AUTH_USER && process.env.BASIC_AUTH_PASSWORD);
+  const diagnostico =
+    `Autenticação necessária.\n\n` +
+    `Diagnóstico do login (versão 2):\n` +
+    `- variável BASIC_AUTH_USERS encontrada: ${temLista ? "sim" : "NÃO"}\n` +
+    `- usuário antigo (BASIC_AUTH_USER/PASSWORD) encontrado: ${temAntigo ? "sim" : "não"}\n` +
+    `- total de usuários aceitos: ${total}\n`;
+  return new Response(diagnostico, {
     status: 401,
     headers: {
       "WWW-Authenticate": 'Basic realm="Acesso restrito - CR 12/2026 CAIXA", charset="UTF-8"',
+      "Content-Type": "text/plain; charset=utf-8",
     },
   });
 }
