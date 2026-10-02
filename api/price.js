@@ -44,13 +44,14 @@ const sql = CONNECTION_STRING ? neon(CONNECTION_STRING) : null;
 // Isso é o que possibilita rastrear qual versão gerou qual precificação,
 // exigência explícita do item 20.14 ("controle de versão e de vigência").
 const METADADOS_MODELO = {
-  versao: "1.1.0-baseline",
+  versao: "1.1.1-baseline",
   tipo_modelo: "baseline_deterministico_referencia_regional",
   data_atualizacao: "2026-10-02",
   descricao: "Tabela de referência de preço/m² por região + ajustes percentuais fixos. Não é modelo estatístico treinado (ver Relatório do Modelo, Seção 3.1).",
   historico_versoes: [
     { versao: "1.0.0-baseline", data: "2026-08-24", mudanca: "Versão inicial: tabela DF + Cidade Ocidental/GO." },
     { versao: "1.1.0-baseline", data: "2026-10-02", mudanca: "São Paulo/SP (capital) com preço/m² por bairro; correção de leitura de área com separador de milhar; motivos de revisão explícitos." },
+    { versao: "1.1.1-baseline", data: "2026-10-02", mudanca: "Definição explícita de cada tipo de área na extração; área construída para casas; área do terreno nunca usada como base." },
   ],
 };
 
@@ -603,7 +604,7 @@ function avaliarRecusa(dados, areaPrivativa, areaTotal, area, calculo) {
   if (!area) {
     return {
       motivo: "a",
-      fundamentacao: "Não foi possível determinar a área do imóvel (area_privativa_m2 e area_total_m2 ausentes ou inválidos) — o modelo não tem base pra calcular um valor.",
+      fundamentacao: "Não foi possível determinar a área do imóvel (áreas privativa, construída e total ausentes ou inválidas) — o modelo não tem base pra calcular um valor.",
     };
   }
 
@@ -733,17 +734,27 @@ export default async function handler(req, res) {
       return res.status(400).json({ erro: "Corpo da requisição ausente ou inválido." });
     }
 
+    // Ordem de preferência da área-base do cálculo:
+    //   1. privativa (apartamento/sala/loja — base dos preços/m² de referência)
+    //   2. construída (casa/sobrado — quando não há "privativa")
+    //   3. total da unidade (último recurso, sempre com revisão)
+    // A área do TERRENO nunca é usada como base: em apartamento ela é do
+    // prédio inteiro; em casa, multiplicá-la pelo preço/m² de construção
+    // superestima (bug relatado no teste ao vivo de 02/10/2026).
     const leituraPrivativa = interpretarArea(dados.area_privativa_m2);
+    const leituraConstruida = interpretarArea(dados.area_construida_m2);
     const leituraTotal = interpretarArea(dados.area_total_m2);
     const areaPrivativa = leituraPrivativa.valor;
+    const areaConstruida = leituraConstruida.valor;
     const areaTotal = leituraTotal.valor;
-    const area = areaPrivativa || areaTotal;
-    const origemArea = areaPrivativa
-      ? "area_privativa_m2"
+    const areaTerreno = interpretarArea(dados.area_terreno_m2).valor;
+    const [area, origemArea, areaAmbigua] = areaPrivativa
+      ? [areaPrivativa, "area_privativa_m2", leituraPrivativa.ambigua]
+      : areaConstruida
+      ? [areaConstruida, "area_construida_m2 (privativa ausente)", leituraConstruida.ambigua]
       : areaTotal
-      ? "area_total_m2 (privativa ausente)"
-      : null;
-    const areaAmbigua = areaPrivativa ? leituraPrivativa.ambigua : leituraTotal.ambigua;
+      ? [areaTotal, "area_total_m2 (privativa e construída ausentes)", leituraTotal.ambigua]
+      : [null, null, false];
 
     const calculo = obterPrecoM2(dados);
 
@@ -802,13 +813,16 @@ export default async function handler(req, res) {
     // (e no relatório) — "precisa revisão" sem dizer por quê não ajuda o
     // engenheiro que vai revisar.
     const motivosRevisao = [];
+    let detalhesTrecho = null;
     if (!regiao) motivosRevisao.push("Bairro/região não reconhecido no endereço — usado o valor médio da cidade.");
     if (!FONTES_DE_REFERENCIA.has(fonte)) motivosRevisao.push(`Preço/m² de fonte não validada (${fonte}).`);
     if (amostraN !== null && amostraN < AMOSTRA_MINIMA_CONFIAVEL) motivosRevisao.push(`Amostra pequena no bairro (${amostraN} anúncios; mínimo ${AMOSTRA_MINIMA_CONFIAVEL}).`);
     if (confiancaExigeRevisao(dados.confianca_extracao)) motivosRevisao.push(`Confiança da extração "${dados.confianca_extracao || "não informada"}".`);
     if (dados.imovel_pertence_caixa === null || dados.imovel_pertence_caixa === undefined) motivosRevisao.push("Não foi possível determinar se o imóvel pertence à CAIXA.");
     if (areaAmbigua) motivosRevisao.push(`Área com leitura ambígua (valor extraído: "${areaPrivativa ? dados.area_privativa_m2 : dados.area_total_m2}") — conferir na matrícula.`);
-    if (!areaPrivativa && areaTotal) motivosRevisao.push("Área privativa ausente — usada a área total (em casa/terreno pode ser área do lote, não construída).");
+    if (!areaPrivativa && !areaConstruida && areaTotal) motivosRevisao.push("Áreas privativa e construída ausentes — usada a área total da unidade; conferir na matrícula.");
+    if (areaTerreno && area && Math.abs(area - areaTerreno) < 0.01) motivosRevisao.push("A área usada no cálculo é igual à área do terreno — possível confusão entre área do lote/prédio e área da unidade.");
+    if (dados.area_trecho_fonte) detalhesTrecho = String(dados.area_trecho_fonte).slice(0, 200);
     if (elegibilidade !== null && !elegibilidade.dentro_do_criterio) motivosRevisao.push("Fora do critério de elegibilidade da cidade: " + elegibilidade.motivos_fora_do_criterio.join("; ") + ".");
 
     const precisaRevisaoManual = motivosRevisao.length > 0;
@@ -827,6 +841,11 @@ export default async function handler(req, res) {
         area_utilizada_m2: area,
         origem_area: origemArea,
         area_leitura_ambigua: areaAmbigua,
+        area_trecho_fonte: detalhesTrecho,
+        areas_extraidas: {
+          privativa: areaPrivativa, construida: areaConstruida, total: areaTotal,
+          terreno: areaTerreno, comum: interpretarArea(dados.area_comum_m2).valor,
+        },
         cidade_identificada: cidade,
         endereco_original: dados.endereco_completo || null,
         regiao_identificada: regiao || "não reconhecida (endereço não bateu com padrões conhecidos)",

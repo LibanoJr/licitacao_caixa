@@ -41,7 +41,15 @@ Só inclua em historico_atos_relevantes os atos que mudam propriedade, criam/can
 
 Se um campo não existir no documento, use null ou lista vazia. Nunca invente informação que não esteja no texto.
 
-Áreas (area_privativa_m2, area_total_m2, area_comum_m2): escreva SEMPRE no formato brasileiro, com vírgula decimal e ponto de milhar, copiando o número como aparece no documento (ex: "1.200,00", "65,32"). Não converta para ponto decimal. Sem a unidade.
+ÁREAS — leia com atenção, é o campo que mais causa erro de precificação. Matrículas usam nomes diferentes para a mesma coisa; classifique pelo SIGNIFICADO, não pela palavra:
+- area_privativa_m2: área de uso EXCLUSIVO da unidade. Aparece como "área privativa", "área real privativa", "área privativa real", "área útil", "área de uso exclusivo". Em apartamento, sala ou loja, é ESTE o número que importa. Se a vaga de garagem tiver área própria discriminada, não some à área privativa da unidade.
+- area_comum_m2: área de uso comum que cabe à unidade ("área comum", "área real de uso comum").
+- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio.
+- area_construida_m2: em casa/sobrado/galpão, a área construída/edificada ("área construída", "área edificada", "com X m² de construção").
+- area_terreno_m2: área do lote/terreno. Em casa ou terreno, a área do lote. Em apartamento, a área do terreno onde o edifício está construído (normalmente na descrição do condomínio ou da incorporação) — esse número é do PRÉDIO INTEIRO e nunca deve ir para area_privativa_m2 nem area_total_m2.
+- Se houver averbação posterior de ampliação, retificação de área ou demolição, use a área MAIS RECENTE e registre isso em alertas.
+- area_trecho_fonte: copie o trecho curto do documento (até 200 caracteres) de onde tirou a área privativa (ou a construída, em casa), para conferência humana.
+- Formato: SEMPRE brasileiro, vírgula decimal e ponto de milhar, como está no documento (ex: "1.250,00", "68,45"). Não converta para ponto decimal. Sem a unidade.
 
 Critério para confianca_extracao (aplique com rigor — na dúvida entre dois níveis, escolha sempre o mais baixo):
 - "baixa": há texto ilegível, cortado, borrado, páginas faltando, ou informação central (proprietário atual, ônus ativos) ambígua ou conflitante entre trechos do documento.
@@ -64,6 +72,9 @@ const RESPONSE_SCHEMA = {
     area_privativa_m2: { type: "STRING", nullable: true },
     area_total_m2: { type: "STRING", nullable: true },
     area_comum_m2: { type: "STRING", nullable: true },
+    area_construida_m2: { type: "STRING", nullable: true },
+    area_terreno_m2: { type: "STRING", nullable: true },
+    area_trecho_fonte: { type: "STRING", nullable: true },
     vaga_garagem: { type: "BOOLEAN", nullable: true },
     proprietario_atual_nome: { type: "STRING", nullable: true },
     proprietario_atual_documento: { type: "STRING", nullable: true },
