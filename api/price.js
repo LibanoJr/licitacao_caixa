@@ -55,28 +55,66 @@ const METADADOS_MODELO = {
   ],
 };
 
-// RT pela Modelagem (item 4.3) e RT pela Precificação/Emissão (item 4.9)
-// — preencher os nomes reais assim que confirmados pelo time. Aparecer
-// em todo resultado é exigência dos itens 2.2.iii e 17.6, não é opcional.
-// Nomes e registros profissionais vêm de variáveis de ambiente na Vercel,
-// pra poder preencher/trocar sem mexer no código. Se não configurados,
-// aparecem como "PENDENTE" (nunca como null silencioso) — assim fica
-// visível no relatório que a exigência ainda não foi cumprida.
-function rt(nomeEnv, registroEnv, nomePadrao, funcao) {
+// Responsáveis Técnicos — Roteiro do Relatório do Modelo (CAIXA, edital
+// 012/2026), itens 1.2 (Modelo), 1.3 (Análise do Mercado Imobiliário) e
+// 1.4 (Inserção de Dados e Emissão do Relatório). Aparecer em todo
+// resultado é exigência dos itens 2.2.iii e 17.6 do Anexo I.
+//
+// Os valores padrão abaixo podem ser sobrescritos por variáveis de
+// ambiente na Vercel (RT_<FUNCAO>_NOME / _REGISTRO / _FORMACAO /
+// _TITULACAO / _VINCULO), sem mexer no código.
+//
+// CPF NÃO fica aqui de propósito: este objeto sai em toda resposta da API
+// e em todo PDF — CPF só vai no Relatório do Modelo enviado à CAIXA (LGPD).
+//
+// Qualquer informação obrigatória que faltar vira uma "pendência" visível
+// na tela e no PDF (nunca um null silencioso).
+const RT_PADRAO = {
+  modelagem: {
+    nome: "Líbano Abboud Júnior",
+    funcao: "RT pelo Modelo de Precificação Automatizada (item 1.2)",
+    exige_registro: false,
+  },
+  analise_mercado_imobiliario: {
+    nome: "Rogério César Soares Leite de Aleluia",
+    funcao: "RT pela Análise do Mercado Imobiliário (item 1.3)",
+    exige_registro: true, // CREA/CAU obrigatório no roteiro da CAIXA
+  },
+  emissao_relatorio: {
+    nome: "Rogério César Soares Leite de Aleluia",
+    funcao: "RT pela Inserção de Dados e Emissão do Relatório (item 1.4)",
+    exige_registro: true, // CREA/CAU obrigatório no roteiro da CAIXA
+  },
+};
+
+function rt(chave, prefixoEnv) {
+  const padrao = RT_PADRAO[chave];
+  const env = (campo) => (process.env[`${prefixoEnv}_${campo}`] || "").trim() || null;
+
+  const nome = env("NOME") || padrao.nome || null;
+  const registro = env("REGISTRO") || padrao.registro_profissional || null;
+
+  const pendencias = [];
+  if (!nome) pendencias.push(`nome (configurar ${prefixoEnv}_NOME)`);
+  if (padrao.exige_registro && !registro) {
+    pendencias.push(`registro CREA/CAU (configurar ${prefixoEnv}_REGISTRO)`);
+  }
+
   return {
-    nome: process.env[nomeEnv] || nomePadrao || "PENDENTE — configurar " + nomeEnv,
-    registro_profissional: process.env[registroEnv] || null,
-    funcao,
+    nome: nome || "PENDENTE",
+    funcao: padrao.funcao,
+    registro_profissional: registro,
+    formacao: env("FORMACAO"),
+    titulacao: env("TITULACAO"),
+    vinculo_empresa: env("VINCULO"),
+    pendencias,
   };
 }
 
 const RESPONSAVEIS_TECNICOS = {
-  modelagem: rt("RT_MODELAGEM_NOME", "RT_MODELAGEM_REGISTRO", "Líbano Abboud Júnior",
-    "RT pelo Modelo de Precificação Automatizada (Ciência de Dados)"),
-  analise_mercado_imobiliario: rt("RT_ANALISE_NOME", "RT_ANALISE_REGISTRO", null,
-    "RT pela Análise das Precificações de Imóveis (Mercado Imobiliário)"),
-  emissao_relatorio: rt("RT_EMISSAO_NOME", "RT_EMISSAO_REGISTRO", null,
-    "RT pela Emissão do Relatório de Precificação"),
+  modelagem: rt("modelagem", "RT_MODELAGEM"),
+  analise_mercado_imobiliario: rt("analise_mercado_imobiliario", "RT_ANALISE"),
+  emissao_relatorio: rt("emissao_relatorio", "RT_EMISSAO"),
 };
 
 // ============================================================
