@@ -378,8 +378,15 @@ function renderizar(ext, prec, tempos) {
     b.textContent = r.funcao + ': ';
     const nome = document.createElement('span');
     nome.textContent = r.nome + (r.registro_profissional ? ` (${r.registro_profissional})` : '');
+    const pend = Array.isArray(r.pendencias) ? r.pendencias : [];
     if (String(r.nome).startsWith('PENDENTE')) nome.className = 'pendente';
     div.append(b, nome);
+    if (pend.length) {
+      const aviso = document.createElement('span');
+      aviso.className = 'pendente';
+      aviso.textContent = ' — PENDENTE: ' + pend.join('; ');
+      div.appendChild(aviso);
+    }
     rts.appendChild(div);
   }
   const m = prec.modelo || {};
