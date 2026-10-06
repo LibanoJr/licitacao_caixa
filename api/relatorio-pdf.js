@@ -148,6 +148,9 @@ async function gerarPdf(registro) {
     const r = rts[chave];
     if (!r) continue;
     linha(`${r.funcao}: ${r.nome}${r.registro_profissional ? ` (${r.registro_profissional})` : ""}`);
+    if (Array.isArray(r.pendencias) && r.pendencias.length) {
+      linha(`   PENDENTE: ${r.pendencias.join("; ")}`, { size: 8, color: rgb(0.7, 0.1, 0.1) });
+    }
   }
   linha(`Modelo: ${modelo.versao || "—"} (${modelo.data_atualizacao || "—"}) — ${modelo.tipo_modelo || ""}`);
 
@@ -190,4 +193,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ erro: "Erro interno ao gerar PDF." });
   }
 }
-
