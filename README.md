@@ -25,9 +25,10 @@ Todo o site fica atrás de usuário e senha (`middleware.js`).
 | `GEMINI_API_KEY` | sim | Extração. **Use chave de projeto com faturamento ativo (tier pago)** — no tier gratuito o Google pode usar os documentos enviados para treinar modelos, incompatível com matrícula real (LGPD) |
 | `APP_ACCESS_KEY` | recomendada | Chave extra exigida pelo `/api/extract` |
 | `DATABASE_URL` (ou `STORAGE_DATABASE_URL` da integração Neon) | sim | Histórico, PDF e fluxo pareado |
-| `RT_ANALISE_NOME`, `RT_ANALISE_REGISTRO` | **sim, antes de enviar** | RT pela análise das precificações (item 4.6). Aparece em toda resposta e no PDF; sem ela sai "PENDENTE" |
-| `RT_EMISSAO_NOME`, `RT_EMISSAO_REGISTRO` | **sim, antes de enviar** | RT pela emissão do relatório (item 4.9) |
-| `RT_MODELAGEM_NOME`, `RT_MODELAGEM_REGISTRO` | opcional | RT pela modelagem (padrão: Líbano Abboud Júnior) |
+| `RT_ANALISE_REGISTRO` | **sim, antes de enviar** | CREA/CAU do RT pela Análise do Mercado Imobiliário (item 1.3 do roteiro CAIXA). Padrão do nome: Rogério César Soares Leite de Aleluia. Sem registro, a tela e o PDF mostram "PENDENTE" |
+| `RT_EMISSAO_REGISTRO` | **sim, antes de enviar** | CREA/CAU do RT pela Inserção de Dados e Emissão do Relatório (item 1.4). Padrão do nome: Rogério César Soares Leite de Aleluia |
+| `RT_<FUNCAO>_NOME` | opcional | Sobrescreve o nome padrão (`<FUNCAO>` = `MODELAGEM`, `ANALISE` ou `EMISSAO`). Modelagem (item 1.2): Líbano Abboud Júnior |
+| `RT_<FUNCAO>_FORMACAO`, `_TITULACAO`, `_VINCULO` | opcional | Formação, titulação e vínculo com a empresa, exibidos junto do RT. CPF **não** entra aqui (vai só no Relatório do Modelo, por LGPD) |
 | `GEMINI_MODEL` | opcional | Troca o modelo de extração sem mexer no código (padrão `gemini-3.1-flash-lite`) |
 | `LIMITE_DIARIO_GEMINI` | opcional | Teto diário de chamadas ao Gemini |
 | `LISTA_DOCUMENTOS_CONFLITO` | opcional | CPF/CNPJ separados por vírgula para recusa por conflito de interesse (motivo c) |
