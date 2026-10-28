@@ -56,7 +56,19 @@ Critério para confianca_extracao (aplique com rigor — na dúvida entre dois n
 - "media": o essencial (proprietário atual, ônus ativos) está claro, mas algum campo secundário (área, endereço completo, valores) está incerto, parcialmente ilegível ou precisou ser inferido.
 - "alta": todos os campos relevantes estão claramente legíveis, sem ambiguidade e sem necessidade de inferência.
 
-Critério para imovel_pertence_caixa: só marque true ou false se o texto permitir concluir isso com segurança. Se não for possível determinar com confiança se a Caixa Econômica Federal é a proprietária atual, retorne null e explique o motivo em 'alertas' — não arrisque um chute nesse campo, ele é usado para decisão de leilão.`;
+Critério para imovel_pertence_caixa: só marque true ou false se o texto permitir concluir isso com segurança. Se não for possível determinar com confiança se a Caixa Econômica Federal é a proprietária atual, retorne null e explique o motivo em 'alertas' — não arrisque um chute nesse campo, ele é usado para decisão de leilão.
+
+CARACTERÍSTICAS DA UNIDADE — preencha SOMENTE com o que estiver escrito na matrícula. Se não estiver escrito, use null. Nunca deduza por padrão de mercado ou pelo tipo do imóvel.
+
+- cep: CEP do imóvel no formato "00000-000". Se não constar, null.
+- em_condominio: true se a unidade integra condomínio edilício (unidade autônoma, fração ideal, instituição/especificação ou convenção de condomínio); false se for imóvel isolado; null se não for possível afirmar.
+- quantidade_dormitorios: número de dormitórios/quartos da unidade; suíte conta como dormitório.
+- quantidade_banheiros: número de banheiros descritos, incluindo os das suítes. Lavabo e WC de serviço não somam; se existirem, registre em alertas.
+- quantidade_vagas: número de vagas vinculadas à unidade NESTA matrícula. Vaga com matrícula própria não soma; registre em alertas. Se quantidade_vagas >= 1, vaga_garagem deve ser true.
+- possui_elevador: true apenas se a matrícula mencionar elevador. Se não mencionar, null (nunca false por ausência de menção).
+- data_averbacao_construcao: data (DD/MM/AAAA) do ato de averbação da construção ou habite-se da unidade ou do edifício.
+- data_instituicao_condominio: data (DD/MM/AAAA) do registro de instituição/especificação do condomínio.
+`;
 
 const RESPONSE_SCHEMA = {
   type: "OBJECT",
@@ -76,6 +88,14 @@ const RESPONSE_SCHEMA = {
     area_terreno_m2: { type: "STRING", nullable: true },
     area_trecho_fonte: { type: "STRING", nullable: true },
     vaga_garagem: { type: "BOOLEAN", nullable: true },
+    cep: { type: "STRING", nullable: true },
+    em_condominio: { type: "BOOLEAN", nullable: true },
+    quantidade_dormitorios: { type: "INTEGER", nullable: true },
+    quantidade_banheiros: { type: "INTEGER", nullable: true },
+    quantidade_vagas: { type: "INTEGER", nullable: true },
+    possui_elevador: { type: "BOOLEAN", nullable: true },
+    data_averbacao_construcao: { type: "STRING", nullable: true },
+    data_instituicao_condominio: { type: "STRING", nullable: true },
     proprietario_atual_nome: { type: "STRING", nullable: true },
     proprietario_atual_documento: { type: "STRING", nullable: true },
     imovel_pertence_caixa: { type: "BOOLEAN", nullable: true },
@@ -263,6 +283,11 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Resposta da IA não veio em JSON válido. Verifique os logs do servidor para detalhes." });
     }
 
+        parsed._meta_extracao = {
+      modelo_ia: modelo,
+      extraido_em: new Date().toISOString(),
+      commit_sha: process.env.VERCEL_GIT_COMMIT_SHA || null,
+    };
     return res.status(200).json(parsed);
   } catch (error) {
     console.error("Falha ao processar extração:", error);
