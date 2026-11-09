@@ -27,7 +27,7 @@ ALTER TABLE precificacoes
   ADD COLUMN IF NOT EXISTS precisa_revisao_manual  BOOLEAN,
   ADD COLUMN IF NOT EXISTS extracao_bruta          JSONB,
   ADD COLUMN IF NOT EXISTS precificacao_bruta      JSONB,
-  ADD COLUMN IF NOT EXISTS tempo_total_ms          INTEGER,
+  ADD COLUMN IF NOT EXISTS tempo_total_ms          NUMERIC,
   ADD COLUMN IF NOT EXISTS tipo_resposta           TEXT DEFAULT 'estimativa',
   ADD COLUMN IF NOT EXISTS motivo_recusa           TEXT,
   ADD COLUMN IF NOT EXISTS fundamentacao_recusa    TEXT,
@@ -43,3 +43,22 @@ CREATE TABLE IF NOT EXISTS uso_gemini (
   total_sucesso   INTEGER NOT NULL DEFAULT 0,
   total_erro      INTEGER NOT NULL DEFAULT 0
 );
+
+-- Colunas acrescentadas em out/nov 2026 (passos 1 e 3). Já existem no banco de produção.
+ALTER TABLE precificacoes
+  ADD COLUMN IF NOT EXISTS usado_em_treino             BOOLEAN,
+  ADD COLUMN IF NOT EXISTS usuario                     TEXT,
+  ADD COLUMN IF NOT EXISTS commit_sha                  TEXT,
+  ADD COLUMN IF NOT EXISTS ambiente                    TEXT,
+  ADD COLUMN IF NOT EXISTS versao_modelo               TEXT,
+  ADD COLUMN IF NOT EXISTS modelo_ia                   TEXT,
+  ADD COLUMN IF NOT EXISTS node_version                TEXT,
+  ADD COLUMN IF NOT EXISTS cep                         TEXT,
+  ADD COLUMN IF NOT EXISTS em_condominio               BOOLEAN,
+  ADD COLUMN IF NOT EXISTS quantidade_dormitorios      INTEGER,
+  ADD COLUMN IF NOT EXISTS quantidade_banheiros        INTEGER,
+  ADD COLUMN IF NOT EXISTS quantidade_vagas            INTEGER,
+  ADD COLUMN IF NOT EXISTS possui_elevador             BOOLEAN,
+  ADD COLUMN IF NOT EXISTS estado_conservacao          TEXT,
+  ADD COLUMN IF NOT EXISTS data_averbacao_construcao   TEXT,
+  ADD COLUMN IF NOT EXISTS data_instituicao_condominio TEXT;

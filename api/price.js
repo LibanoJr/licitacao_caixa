@@ -44,7 +44,7 @@ const sql = CONNECTION_STRING ? neon(CONNECTION_STRING) : null;
 // Isso é o que possibilita rastrear qual versão gerou qual precificação,
 // exigência explícita do item 20.14 ("controle de versão e de vigência").
 const METADADOS_MODELO = {
-  versao: "1.1.1-baseline",
+  versao: "1.1.2-baseline",
   tipo_modelo: "baseline_deterministico_referencia_regional",
   data_atualizacao: "2026-10-02",
   descricao: "Tabela de referência de preço/m² por região + ajustes percentuais fixos. Não é modelo estatístico treinado (ver Relatório do Modelo, Seção 3.1).",
@@ -52,6 +52,7 @@ const METADADOS_MODELO = {
     { versao: "1.0.0-baseline", data: "2026-08-24", mudanca: "Versão inicial: tabela DF + Cidade Ocidental/GO." },
     { versao: "1.1.0-baseline", data: "2026-10-02", mudanca: "São Paulo/SP (capital) com preço/m² por bairro; correção de leitura de área com separador de milhar; motivos de revisão explícitos." },
     { versao: "1.1.1-baseline", data: "2026-10-02", mudanca: "Definição explícita de cada tipo de área na extração; área construída para casas; área do terreno nunca usada como base." },
+    { versao: "1.1.2-baseline", data: "2026-11-09", mudanca: "Registro de usuário, commit, ambiente, versão do Node e campos novos da extração em cada precificação; nenhuma precificação é emitida sem registro no banco." },
   ],
 };
 
@@ -594,9 +595,25 @@ function confiancaExigeRevisao(confiancaExtracao) {
 
 // Grava o registro de auditoria. NUNCA deixa uma falha aqui derrubar a
 // resposta principal — só loga o erro no console da Vercel.
+// Passo 3 (1.1.2): usuário logado e conversões seguras para as colunas novas.
+function usuarioDaRequisicao(req) {
+  try {
+    const h = (req.headers && req.headers.authorization) || "";
+    if (!h.startsWith("Basic ")) return null;
+    const dec = Buffer.from(h.slice(6), "base64").toString("utf8");
+    const i = dec.indexOf(":");
+    return i > 0 ? dec.slice(0, i) : null;
+  } catch { return null; }
+}
+function inteiroOuNull(v) { if (v === null || v === undefined || v === "") return null; const n = Number(v); return Number.isInteger(n) ? n : null; }
+function booleanoOuNull(v) { return typeof v === "boolean" ? v : null; }
+function textoOuNull(v) { return v === null || v === undefined || v === "" ? null : String(v); }
+function cepOuNull(v) { if (v === null || v === undefined) return null; const d = String(v).replace(/\D/g, ""); return d.length === 7 || d.length === 8 ? d.padStart(8, "0") : null; }
+
 async function gravarHistorico(dados, calculo, respostaFinal) {
   if (!sql) {
-    console.warn("Nenhuma variável de conexão do banco encontrada — pulando gravação de histórico.");
+    console.error("Nenhuma variável de conexão do banco encontrada — precificação NÃO emitida.");
+    throw new Error("Banco de dados não configurado; nenhum valor foi emitido.");
     return null;
   }
   try {
@@ -607,7 +624,10 @@ async function gravarHistorico(dados, calculo, respostaFinal) {
         preco_m2_utilizado, fonte_preco_m2, valor_estimado, fator_ajuste,
         confianca_extracao, imovel_pertence_caixa, onus_ativos, alertas_extracao,
         precisa_revisao_manual, extracao_bruta, precificacao_bruta, tempo_total_ms,
-        tipo_resposta, motivo_recusa, fundamentacao_recusa
+        tipo_resposta, motivo_recusa, fundamentacao_recusa,
+        usuario, commit_sha, ambiente, versao_modelo, modelo_ia, node_version,
+        cep, em_condominio, quantidade_dormitorios, quantidade_banheiros, quantidade_vagas,
+        possui_elevador, data_averbacao_construcao, data_instituicao_condominio
       ) VALUES (
         ${dados.numero_matricula || null}, ${dados.endereco_completo || null},
         ${calculo.cidade}, ${calculo.regiao},
@@ -618,13 +638,19 @@ async function gravarHistorico(dados, calculo, respostaFinal) {
         ${JSON.stringify(dados.onus_ativos || [])}, ${JSON.stringify(dados.alertas || [])},
         ${respostaFinal.precisa_revisao_manual ?? null},
         ${JSON.stringify(dados)}, ${JSON.stringify(respostaFinal)}, ${calculo.tempoTotalMs},
-        ${calculo.tipoResposta || "estimativa"}, ${calculo.motivoRecusa || null}, ${calculo.fundamentacaoRecusa || null}
+        ${calculo.tipoResposta || "estimativa"}, ${calculo.motivoRecusa || null}, ${calculo.fundamentacaoRecusa || null},
+        ${textoOuNull(dados._usuario)}, ${process.env.VERCEL_GIT_COMMIT_SHA || null}, ${process.env.VERCEL_ENV || null},
+        ${METADADOS_MODELO.versao}, ${textoOuNull(dados._meta_extracao && dados._meta_extracao.modelo_ia)}, ${process.version},
+        ${cepOuNull(dados.cep)}, ${booleanoOuNull(dados.em_condominio)}, ${inteiroOuNull(dados.quantidade_dormitorios)},
+        ${inteiroOuNull(dados.quantidade_banheiros)}, ${inteiroOuNull(dados.quantidade_vagas)},
+        ${booleanoOuNull(dados.possui_elevador)}, ${textoOuNull(dados.data_averbacao_construcao)}, ${textoOuNull(dados.data_instituicao_condominio)}
       )
       RETURNING id
     `;
     return linhas[0]?.id ?? null;
   } catch (dbErr) {
-    console.error("Falha ao gravar histórico (não afeta a resposta):", dbErr.message);
+    console.error("Falha ao gravar histórico — precificação NÃO emitida:", dbErr.message);
+    throw new Error("Precificação não registrada no banco; nenhum valor foi emitido.");
     return null;
   }
 }
@@ -806,6 +832,7 @@ export default async function handler(req, res) {
 
   try {
     const dados = req.body;
+    if (dados && typeof dados === "object") dados._usuario = usuarioDaRequisicao(req);
 
     if (!dados || typeof dados !== "object") {
       return res.status(400).json({ erro: "Corpo da requisição ausente ou inválido." });
