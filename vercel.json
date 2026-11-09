@@ -1,23 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["gru1"],
   "functions": {
-    "api/extract.js": {
-      "maxDuration": 30
-    },
-    "api/price.js": {
-      "maxDuration": 15
-    },
-    "api/historico.js": {
-      "maxDuration": 15
-    },
-    "api/registrar-avaliacao.js": {
-      "maxDuration": 10
-    },
-    "api/fluxo-pareado.js": {
-      "maxDuration": 15
-    },
-    "api/relatorio-pdf.js": {
-      "maxDuration": 15
-    }
+    "api/extract.js": { "maxDuration": 30 },
+    "api/price.js": { "maxDuration": 15 },
+    "api/historico.js": { "maxDuration": 15 },
+    "api/registrar-avaliacao.js": { "maxDuration": 10 },
+    "api/fluxo-pareado.js": { "maxDuration": 15 },
+    "api/relatorio-pdf.js": { "maxDuration": 15 }
   }
 }
