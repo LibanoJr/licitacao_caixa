@@ -44,7 +44,7 @@ Se um campo não existir no documento, use null ou lista vazia. Nunca invente in
 ÁREAS — leia com atenção, é o campo que mais causa erro de precificação. Matrículas usam nomes diferentes para a mesma coisa; classifique pelo SIGNIFICADO, não pela palavra:
 - area_privativa_m2: área de uso EXCLUSIVO da unidade. Aparece como "área privativa", "área real privativa", "área privativa real", "área útil", "área de uso exclusivo". Em apartamento, sala ou loja, é ESTE o número que importa. Se a vaga de garagem tiver área própria discriminada, não some à área privativa da unidade.
 - area_comum_m2: área de uso comum que cabe à unidade ("área comum", "área real de uso comum").
-- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio.
+- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio. Termos como "área total comum", "área comum total" ou "total da área comum" referem-se à área COMUM (area_comum_m2), nunca a area_total_m2. A area_total_m2 é sempre maior ou igual à area_privativa_m2.
 - area_construida_m2: em casa/sobrado/galpão, a área construída/edificada ("área construída", "área edificada", "com X m² de construção").
 - area_terreno_m2: área do lote/terreno. Em casa ou terreno, a área do lote. Em apartamento, a área do terreno onde o edifício está construído (normalmente na descrição do condomínio ou da incorporação) — esse número é do PRÉDIO INTEIRO e nunca deve ir para area_privativa_m2 nem area_total_m2.
 - Se houver averbação posterior de ampliação, retificação de área ou demolição, use a área MAIS RECENTE e registre isso em alertas.
@@ -57,6 +57,11 @@ Critério para confianca_extracao (aplique com rigor — na dúvida entre dois n
 - "alta": todos os campos relevantes estão claramente legíveis, sem ambiguidade e sem necessidade de inferência.
 
 Critério para imovel_pertence_caixa: só marque true ou false se o texto permitir concluir isso com segurança. Se não for possível determinar com confiança se a Caixa Econômica Federal é a proprietária atual, retorne null e explique o motivo em 'alertas' — não arrisque um chute nesse campo, ele é usado para decisão de leilão.
+
+CAMPOS DE IDENTIFICAÇÃO — regras obrigatórias:
+- numero_matricula: o número do campo "matrícula" no cabeçalho ou na abertura da matrícula (ex.: "216.431"), como está no documento. NUNCA use o CNM (Código Nacional de Matrícula, no formato 000000.0.0000000-00): ele vai somente no campo cnm.
+- endereco_completo: monte a partir da descrição do imóvel (bloco "IMÓVEL" e averbações de endereço), com tudo o que existir no documento: tipo e número da unidade (ex.: "Apartamento 904"), bloco ou torre, logradouro, número do prédio, bairro ou subdistrito e cidade/UF. Exemplo: "Rua Antonio do Campo, nº 883, Apartamento 904, Torre C, Santo Amaro, São Paulo/SP". O número da unidade e o bloco/torre são obrigatórios quando constarem na matrícula. Só use null se o documento não trouxer logradouro.
+- proprietario_atual_documento: CPF ou CNPJ do proprietário ATUAL. Se o ato que o torna proprietário disser apenas "já qualificado(a)", procure a qualificação dele em atos anteriores (por exemplo, no registro da alienação fiduciária, onde a Caixa Econômica Federal aparece com o CNPJ) e copie o número exatamente como escrito. Só use null se o número não aparecer em nenhum ponto do documento.
 
 CARACTERÍSTICAS DA UNIDADE — preencha SOMENTE com o que estiver escrito na matrícula. Se não estiver escrito, use null. Nunca deduza por padrão de mercado ou pelo tipo do imóvel.
 
@@ -283,7 +288,33 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Resposta da IA não veio em JSON válido. Verifique os logs do servidor para detalhes." });
     }
 
-        parsed._meta_extracao = {
+        // Validações determinísticas pós-extração (extração v1.1.3)
+    const numBR = (v) => {
+      if (v == null) return null;
+      const t = String(v).replace(/[^\d,.\-]/g, '');
+      if (!t) return null;
+      const n = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
+      return Number.isFinite(n) ? n : null;
+    };
+    parsed.alertas = Array.isArray(parsed.alertas) ? parsed.alertas : [];
+    if (parsed.numero_matricula && /^\d{6}\.\d\.\d{7}-\d{2}$/.test(String(parsed.numero_matricula).trim())) {
+      if (!parsed.cnm) parsed.cnm = parsed.numero_matricula;
+      parsed.numero_matricula = null;
+      parsed.alertas.push('Número lido como matrícula era o CNM; número da matrícula não identificado. Revisão manual.');
+      parsed.confianca_extracao = 'baixa';
+    }
+    const priv = numBR(parsed.area_privativa_m2);
+    const tot = numBR(parsed.area_total_m2);
+    if (priv != null && tot != null && tot < priv) {
+      parsed.alertas.push(`Área total (${parsed.area_total_m2}) menor que a privativa (${parsed.area_privativa_m2}): provável leitura da área comum como total. Revisão manual.`);
+      parsed.confianca_extracao = 'baixa';
+    }
+    if (!parsed.endereco_completo) {
+      parsed.alertas.push('Endereço não identificado. Revisão manual.');
+      if (parsed.confianca_extracao === 'alta') parsed.confianca_extracao = 'media';
+    }
+
+    parsed._meta_extracao = {
       modelo_ia: modelo,
       extraido_em: new Date().toISOString(),
       commit_sha: process.env.VERCEL_GIT_COMMIT_SHA || null,
