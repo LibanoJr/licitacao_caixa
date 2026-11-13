@@ -44,7 +44,7 @@ Se um campo não existir no documento, use null ou lista vazia. Nunca invente in
 ÁREAS — leia com atenção, é o campo que mais causa erro de precificação. Matrículas usam nomes diferentes para a mesma coisa; classifique pelo SIGNIFICADO, não pela palavra:
 - area_privativa_m2: área de uso EXCLUSIVO da unidade. Aparece como "área privativa", "área real privativa", "área privativa real", "área útil", "área de uso exclusivo". Em apartamento, sala ou loja, é ESTE o número que importa. Se a vaga de garagem tiver área própria discriminada, não some à área privativa da unidade.
 - area_comum_m2: área de uso comum que cabe à unidade ("área comum", "área real de uso comum").
-- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio. Termos como "área total comum", "área comum total" ou "total da área comum" referem-se à área COMUM (area_comum_m2), nunca a area_total_m2. A area_total_m2 é sempre maior ou igual à area_privativa_m2.
+- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio. Termos como "área total comum", "área comum total" ou "total da área comum" referem-se à área COMUM (area_comum_m2), nunca a area_total_m2. A area_total_m2 é sempre maior ou igual à area_privativa_m2. Quando a matrícula declarar expressamente a área total da unidade (ex.: "perfazendo a área total de 80,497m²", "área real total de 70,778m²"), copie exatamente esse número. Se o documento trouxer mais de um total (por exemplo, "total da área edificada" e "área construída mais descoberta"), use o maior deles como area_total_m2, registre os dois em alertas e informe em area_comum_m2 a soma de todas as áreas comuns (cobertas e descobertas).
 - area_construida_m2: em casa/sobrado/galpão, a área construída/edificada ("área construída", "área edificada", "com X m² de construção").
 - area_terreno_m2: área do lote/terreno. Em casa ou terreno, a área do lote. Em apartamento, a área do terreno onde o edifício está construído (normalmente na descrição do condomínio ou da incorporação) — esse número é do PRÉDIO INTEIRO e nunca deve ir para area_privativa_m2 nem area_total_m2.
 - Se houver averbação posterior de ampliação, retificação de área ou demolição, use a área MAIS RECENTE e registre isso em alertas.
@@ -307,6 +307,11 @@ export default async function handler(req, res) {
     const tot = numBR(parsed.area_total_m2);
     if (priv != null && tot != null && tot < priv) {
       parsed.alertas.push(`Área total (${parsed.area_total_m2}) menor que a privativa (${parsed.area_privativa_m2}): provável leitura da área comum como total. Revisão manual.`);
+      parsed.confianca_extracao = 'baixa';
+    }
+    const com = numBR(parsed.area_comum_m2);
+    if (priv != null && com != null && tot != null && Math.abs(priv + com - tot) > 0.05) {
+      parsed.alertas.push(`Área total (${parsed.area_total_m2}) não confere com privativa + comum (${parsed.area_privativa_m2} + ${parsed.area_comum_m2}). Revisão manual.`);
       parsed.confianca_extracao = 'baixa';
     }
     if (!parsed.endereco_completo) {
