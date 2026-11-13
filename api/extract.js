@@ -44,7 +44,15 @@ Se um campo não existir no documento, use null ou lista vazia. Nunca invente in
 ÁREAS — leia com atenção, é o campo que mais causa erro de precificação. Matrículas usam nomes diferentes para a mesma coisa; classifique pelo SIGNIFICADO, não pela palavra:
 - area_privativa_m2: área de uso EXCLUSIVO da unidade. Aparece como "área privativa", "área real privativa", "área privativa real", "área útil", "área de uso exclusivo". Em apartamento, sala ou loja, é ESTE o número que importa. Se a vaga de garagem tiver área própria discriminada, não some à área privativa da unidade.
 - area_comum_m2: área de uso comum que cabe à unidade ("área comum", "área real de uso comum").
-- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio. Termos como "área total comum", "área comum total" ou "total da área comum" referem-se à área COMUM (area_comum_m2), nunca a area_total_m2. A area_total_m2 é sempre maior ou igual à area_privativa_m2. Quando a matrícula declarar expressamente a área total da unidade (ex.: "perfazendo a área total de 80,497m²", "área real total de 70,778m²"), copie exatamente esse número. Se o documento trouxer mais de um total (por exemplo, "total da área edificada" e "área construída mais descoberta"), use o maior deles como area_total_m2, registre os dois em alertas e informe em area_comum_m2 a soma de todas as áreas comuns (cobertas e descobertas).
+- area_total_m2: área total DA UNIDADE = privativa + comum ("área total", "área real total"). NUNCA coloque aqui a área do terreno do edifício/condomínio. Termos como "área total comum", "área comum total" ou "total da área comum" referem-se à área COMUM (area_comum_m2), nunca a area_total_m2. A area_total_m2 é sempre maior ou igual à area_privativa_m2. Para as áreas da unidade, preencha os COMPONENTES abaixo copiando cada número exatamente como escrito no documento, sem somar nem calcular, e use null quando o componente não existir:
+- area_privativa_m2: a área privativa TOTAL da unidade. Se o documento disser "área privativa total de X, sendo Y coberta e Z descoberta (ou terraço)", use X.
+- area_comum_coberta_m2: a área comum coberta (também chamada de área comum edificada ou de uso comum coberta).
+- area_comum_descoberta_m2: a área comum descoberta.
+- area_vaga_garagem_m2: a área da vaga ou garagem vinculada à unidade, quando vier discriminada separadamente da área comum. Vaga com matrícula própria não entra.
+- area_comum_m2: a área comum total da unidade, se o documento informar esse total ("área comum total", "área real de uso comum").
+- area_total_declarada_m2: o número que o documento chama de área total, área real total ou "perfazendo a área total" da unidade, incluindo as partes descobertas. Nunca a "área comum total".
+- area_total_edificada_m2: o número que o documento chama de "total da área edificada", sem as partes descobertas, quando existir.
+- area_total_m2: repita area_total_declarada_m2. O sistema recalcula e confere a soma dos componentes.
 - area_construida_m2: em casa/sobrado/galpão, a área construída/edificada ("área construída", "área edificada", "com X m² de construção").
 - area_terreno_m2: área do lote/terreno. Em casa ou terreno, a área do lote. Em apartamento, a área do terreno onde o edifício está construído (normalmente na descrição do condomínio ou da incorporação) — esse número é do PRÉDIO INTEIRO e nunca deve ir para area_privativa_m2 nem area_total_m2.
 - Se houver averbação posterior de ampliação, retificação de área ou demolição, use a área MAIS RECENTE e registre isso em alertas.
@@ -89,6 +97,11 @@ const RESPONSE_SCHEMA = {
     area_privativa_m2: { type: "STRING", nullable: true },
     area_total_m2: { type: "STRING", nullable: true },
     area_comum_m2: { type: "STRING", nullable: true },
+    area_comum_coberta_m2: { type: "STRING", nullable: true },
+    area_comum_descoberta_m2: { type: "STRING", nullable: true },
+    area_vaga_garagem_m2: { type: "STRING", nullable: true },
+    area_total_declarada_m2: { type: "STRING", nullable: true },
+    area_total_edificada_m2: { type: "STRING", nullable: true },
     area_construida_m2: { type: "STRING", nullable: true },
     area_terreno_m2: { type: "STRING", nullable: true },
     area_trecho_fonte: { type: "STRING", nullable: true },
@@ -303,15 +316,42 @@ export default async function handler(req, res) {
       parsed.alertas.push('Número lido como matrícula era o CNM; número da matrícula não identificado. Revisão manual.');
       parsed.confianca_extracao = 'baixa';
     }
+    // Áreas: total recalculado a partir dos componentes (extração v1.2.0)
+    const decs = (v) => { const m = String(v ?? '').match(/,(\d+)/); return m ? m[1].length : 0; };
+    const fmtBR = (n, d) => n.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
     const priv = numBR(parsed.area_privativa_m2);
+    const cob = numBR(parsed.area_comum_coberta_m2);
+    const desc = numBR(parsed.area_comum_descoberta_m2);
+    const vaga = numBR(parsed.area_vaga_garagem_m2);
+    const comTot = numBR(parsed.area_comum_m2);
+    const decl = numBR(parsed.area_total_declarada_m2);
+    const edif = numBR(parsed.area_total_edificada_m2);
+    const temPartes = cob != null || desc != null || vaga != null;
+    const comum = temPartes ? (cob || 0) + (desc || 0) + (vaga || 0) : comTot;
+    parsed._areas = { privativa: priv, comum_coberta: cob, comum_descoberta: desc, vaga_garagem: vaga, comum_total: comum, total_declarada: decl, total_edificada: edif, conferencia: null };
+    if (priv != null && comum != null) {
+      const calc = priv + comum;
+      const d = Math.max(3, decs(parsed.area_privativa_m2), decs(parsed.area_comum_coberta_m2), decs(parsed.area_comum_descoberta_m2), decs(parsed.area_vaga_garagem_m2), decs(parsed.area_comum_m2));
+      parsed.area_total_m2 = fmtBR(calc, d);
+      if (decl == null) {
+        parsed._areas.conferencia = 'sem total declarado';
+      } else if (Math.abs(decl - calc) <= 0.05) {
+        parsed._areas.conferencia = 'confere';
+      } else {
+        parsed._areas.conferencia = 'diverge';
+        parsed.alertas.push(`Área total calculada (${parsed.area_total_m2} = privativa + comuns) difere da declarada (${parsed.area_total_declarada_m2}). Revisão manual.`);
+        parsed.confianca_extracao = 'baixa';
+      }
+    } else if (decl != null) {
+      parsed.area_total_m2 = parsed.area_total_declarada_m2;
+      parsed._areas.conferencia = 'sem componentes';
+    }
+    if (edif != null && parsed.area_total_m2 && Math.abs(edif - numBR(parsed.area_total_m2)) > 0.05) {
+      parsed.alertas.push(`Área total edificada, sem partes descobertas: ${parsed.area_total_edificada_m2} m².`);
+    }
     const tot = numBR(parsed.area_total_m2);
     if (priv != null && tot != null && tot < priv) {
-      parsed.alertas.push(`Área total (${parsed.area_total_m2}) menor que a privativa (${parsed.area_privativa_m2}): provável leitura da área comum como total. Revisão manual.`);
-      parsed.confianca_extracao = 'baixa';
-    }
-    const com = numBR(parsed.area_comum_m2);
-    if (priv != null && com != null && tot != null && Math.abs(priv + com - tot) > 0.05) {
-      parsed.alertas.push(`Área total (${parsed.area_total_m2}) não confere com privativa + comum (${parsed.area_privativa_m2} + ${parsed.area_comum_m2}). Revisão manual.`);
+      parsed.alertas.push(`Área total (${parsed.area_total_m2}) menor que a privativa (${parsed.area_privativa_m2}). Revisão manual.`);
       parsed.confianca_extracao = 'baixa';
     }
     if (!parsed.endereco_completo) {
