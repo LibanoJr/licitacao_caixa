@@ -333,10 +333,15 @@ export default async function handler(req, res) {
       const calc = priv + comum;
       const d = Math.max(3, decs(parsed.area_privativa_m2), decs(parsed.area_comum_coberta_m2), decs(parsed.area_comum_descoberta_m2), decs(parsed.area_vaga_garagem_m2), decs(parsed.area_comum_m2));
       parsed.area_total_m2 = fmtBR(calc, d);
+      // v1.2.1: o total declarado pode ser a área edificada (sem partes descobertas)
+      const edifCands = cob != null ? [priv + cob, vaga != null ? priv + cob + vaga : null].filter(x => x != null) : [];
       if (decl == null) {
         parsed._areas.conferencia = 'sem total declarado';
       } else if (Math.abs(decl - calc) <= 0.05) {
         parsed._areas.conferencia = 'confere';
+      } else if (edifCands.some(x => Math.abs(decl - x) <= 0.05)) {
+        parsed._areas.conferencia = 'confere (total declarado = área edificada)';
+        parsed.alertas.push(`Total declarado de ${parsed.area_total_declarada_m2} m² corresponde à área edificada, sem partes descobertas; área total com as partes descobertas: ${parsed.area_total_m2} m².`);
       } else {
         parsed._areas.conferencia = 'diverge';
         parsed.alertas.push(`Área total calculada (${parsed.area_total_m2} = privativa + comuns) difere da declarada (${parsed.area_total_declarada_m2}). Revisão manual.`);
@@ -345,13 +350,19 @@ export default async function handler(req, res) {
     } else if (decl != null) {
       parsed.area_total_m2 = parsed.area_total_declarada_m2;
       parsed._areas.conferencia = 'sem componentes';
+      parsed.alertas.push('Área total copiada do documento, sem componentes para conferência.');
+      if (parsed.confianca_extracao === 'alta') parsed.confianca_extracao = 'media';
+    } else {
+      parsed._areas.conferencia = 'nao conferida';
+      parsed.alertas.push('Áreas comuns e total declarado não identificados; área total não conferida. Revisão manual.');
+      parsed.confianca_extracao = 'baixa';
     }
     if (edif != null && parsed.area_total_m2 && Math.abs(edif - numBR(parsed.area_total_m2)) > 0.05) {
       parsed.alertas.push(`Área total edificada, sem partes descobertas: ${parsed.area_total_edificada_m2} m².`);
     }
     const tot = numBR(parsed.area_total_m2);
-    if (priv != null && tot != null && tot < priv) {
-      parsed.alertas.push(`Área total (${parsed.area_total_m2}) menor que a privativa (${parsed.area_privativa_m2}). Revisão manual.`);
+    if (priv != null && tot != null && tot <= priv + 0.005) {
+      parsed.alertas.push(`Área total (${parsed.area_total_m2}) menor ou igual à privativa (${parsed.area_privativa_m2}). Revisão manual.`);
       parsed.confianca_extracao = 'baixa';
     }
     if (!parsed.endereco_completo) {
