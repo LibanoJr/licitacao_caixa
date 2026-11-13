@@ -314,6 +314,11 @@ export default async function handler(req, res) {
       if (parsed.confianca_extracao === 'alta') parsed.confianca_extracao = 'media';
     }
 
+    if (!parsed.proprietario_atual_documento && /CAIXA ECON[OÔ]MICA FEDERAL/i.test(parsed.proprietario_atual_nome || '')) {
+      parsed.proprietario_atual_documento = '00.360.305/0001-04';
+      parsed.alertas.push('CNPJ da Caixa Econômica Federal preenchido por tabela de referência (proprietário atual identificado como CAIXA).');
+    }
+
     parsed._meta_extracao = {
       modelo_ia: modelo,
       extraido_em: new Date().toISOString(),
